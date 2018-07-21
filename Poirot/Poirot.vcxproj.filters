@@ -22,6 +22,9 @@
     <Filter Include="Source Files\shaders">
       <UniqueIdentifier>{59f1079e-7892-4fc2-8555-4b111309787a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\external\tinygltf">
+      <UniqueIdentifier>{d7870d32-9f27-4204-8537-4b25a540438c}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -64,6 +67,18 @@
     </ClInclude>
     <ClInclude Include="external\dear_imgui\imgui_internal.h">
       <Filter>Source Files\external\dear_imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="external\tiny_gltf\json.hpp">
+      <Filter>Source Files\external\tinygltf</Filter>
+    </ClInclude>
+    <ClInclude Include="external\tiny_gltf\stb_image.h">
+      <Filter>Source Files\external\tinygltf</Filter>
+    </ClInclude>
+    <ClInclude Include="external\tiny_gltf\stb_image_write.h">
+      <Filter>Source Files\external\tinygltf</Filter>
+    </ClInclude>
+    <ClInclude Include="external\tiny_gltf\tiny_gltf.h">
+      <Filter>Source Files\external\tinygltf</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
