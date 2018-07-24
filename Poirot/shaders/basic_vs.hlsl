@@ -7,6 +7,14 @@ cbuffer PerFrameConstants : register(b0) {
     float4 color;
 }
 
+cbuffer Transformations : register(b1) {
+    float4x4 a_world_from_object[32];
+}
+
+cbuffer PerDrawConstants : register(b2) {
+    uint transform_index;
+}
+
 struct VsInput {
     float3 pos_os   : POSITION;
     float3 normal_os: NORMAL;
@@ -24,7 +32,8 @@ VsOutput vs_main(VsInput input) {
     
     VsOutput result = (VsOutput) 0;
     
-    float3 pos_vs = mul(view_from_world, float4(input.pos_os, 1.0));// ASSUMPTION(cerlet): object space = world_space
+    float3 pos_ws = mul(a_world_from_object[transform_index], float4(input.pos_os, 1.0));
+    float3 pos_vs = mul(view_from_world, float4(pos_ws, 1.0));
 
     result.pos_vs = pos_vs;
     result.pos_cs = mul(clip_from_view, float4(pos_vs, 1.0));
