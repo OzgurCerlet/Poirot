@@ -10,10 +10,10 @@ Window::Window(HINSTANCE h_instance, uint16_t width, uint16_t height) : _h_insta
 	RegisterClassEx(&window_class);
 
 	RECT window_rect = { 0,0,static_cast<LONG>(_width),static_cast<LONG>(_height) };
-	AdjustWindowRect(&window_rect, WS_POPUP, FALSE);
+	AdjustWindowRect(&window_rect, WS_OVERLAPPEDWINDOW, FALSE);
 
 	_h_window = CreateWindow(
-		window_class.lpszClassName, "Poirot", WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT,
+		window_class.lpszClassName, "Poirot", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
 		window_rect.right - window_rect.left, window_rect.bottom - window_rect.top, NULL, NULL, _h_instance, NULL
 	);
 	if(_h_window == NULL) { throw std::exception(); };

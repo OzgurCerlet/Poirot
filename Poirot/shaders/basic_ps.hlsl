@@ -1,10 +1,9 @@
-#pragma pack_matrix(row_major)
 
 cbuffer PerFrameConstants : register(b0) {
     float4x4 clip_from_view;
     float4x4 view_from_world;
     float4x4 world_from_view;
-    float4 color;
+    float3 cam_pos_ws;
 }
 
 struct MaterialData{
@@ -32,6 +31,7 @@ cbuffer PerDrawConstants : register(b2) {
 struct PsInput {
     float4 pos_ss   : SV_POSITION;
     float3 pos_vs   : POSITION_VS;
+    float3 pos_ws   : POSITION_WS;
     float3 normal_ws: NORMAL_WS;
     float2 uv       : TEXCOORD;
 };
@@ -40,14 +40,18 @@ struct PsOutput {
     float4 color    : SV_TARGET;
 };
 
-//TextureCube env_map : register(t0);
-#define MAX_NUM_MATERIAL_TEXTURES 32
-Texture2D a_material_textures[MAX_NUM_MATERIAL_TEXTURES] : register(t0);
-TextureCube env_map : register(t1);
+TextureCube env_map_radiance    : register(t0, space0);
+TextureCube env_map_irradiance  : register(t1, space0);
+TextureCube env_map_specular    : register(t2, space0);
+Texture2D env_brdf_lut          : register(t3, space0);
 
-SamplerState trilinear_wrap : register(s0);
+Texture2D a_material_textures[] : register(t0, space1);
+
+SamplerState bilinear_clamp : register(s0);
+SamplerState trilinear_wrap : register(s1);
 
 static const float k_min_roughness = 0.04;
+static const int k_desc_range_offset = -4;
 
 // See http://www.thetenthplanet.de/archives/1180
 float3x3 cotangent_frame(float3 normal_ws, float3 pos_ws, float2 uv) {
@@ -65,17 +69,69 @@ float3x3 cotangent_frame(float3 normal_ws, float3 pos_ws, float2 uv) {
  
     // construct a scale-invariant frame 
     float inv_max = 1.0 / sqrt(max(dot(tangent_ws, tangent_ws), dot(bitangent_ws, bitangent_ws)));
-    return float3x3(tangent_ws * inv_max, bitangent_ws * inv_max, normal_ws);
+    //float3x3(tangent_ws * inv_max, bitangent_ws * inv_max, normal_ws) INVESTIGATE the difference!
+    return transpose(float3x3(bitangent_ws * inv_max, tangent_ws * inv_max,  normal_ws)); 
 }
 
-float3 compute_normal(PsInput input, Texture2D normal_texture) {    
-    float3 normal_ws = normalize(input.normal_ws);
-    float3 pos_ws = mul(world_from_view, float4(input.pos_vs, 1.0)).xyz;
-    float3x3 world_from_tangent = cotangent_frame(normal_ws, pos_ws, input.uv);
+float3 compute_normal(PsInput input, float3 normal_ws, Texture2D normal_texture) {
+
+#if 1
+    
+    float3x3 world_from_tangent = cotangent_frame(normal_ws, input.pos_ws, input.uv);
+
+#else
+
+    float3 pos_dx = ddx(input.pos_ws);
+    float3 pos_dy = ddy(input.pos_ws);
+    float2 tex_dx = ddx(input.uv);
+    float2 tex_dy = ddy(input.uv);
+    float3 t = (tex_dy.y * pos_dx - tex_dx.y * pos_dy) / (tex_dx.x * tex_dy.y - tex_dy.x * tex_dx.y);
+    t = normalize(t - normal_ws * dot(normal_ws, t));
+    float3 b = normalize(cross(normal_ws, t));
+
+    float3x3 world_from_tangent = transpose(float3x3(b, t, normal_ws));
+#endif
+    
     float3 normal_ts = normal_texture.Sample(trilinear_wrap, input.uv).rgb * 2.0 - 1.0;
     normal_ws = normalize(mul(world_from_tangent, normal_ts));
-
+    
     return normal_ws;
+}
+
+// From http://filmicgames.com/archives/75
+float3 tone_map_uncharted_2(float3 x) {
+    float A = 0.15;
+    float B = 0.50;
+    float C = 0.10;
+    float D = 0.20;
+    float E = 0.02;
+    float F = 0.30;
+    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+}
+
+float4 tone_map(float4 color) {
+    float3 out_color = tone_map_uncharted_2(color.rgb * 4.5);
+    out_color = out_color * (1.0f / tone_map_uncharted_2(11.2f));
+    return float4(pow(out_color, 1.0f / 2.2), color.a);
+}
+
+// From
+float3 f_schlick_roughness(float cos_theta, float3 F0, float roughness) {
+    return F0 + ( max((float3)(1.0 - roughness), F0) - F0 ) * pow(1.0 - cos_theta, 5.0);
+}
+
+float3 specular_reflection(float reflectance0, float reflectance90, float VdotH) {
+    return reflectance0 + (reflectance90 - reflectance0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+}
+
+float4 SRGBtoLINEAR(float4 srgbIn) {
+#if 1
+	float3 bLess = step(0.04045, srgbIn.xyz);
+    float3 linOut = lerp(srgbIn.xyz / 12.92, pow((srgbIn.xyz + 0.055) / 1.055, 2.4), bLess);
+	return float4(linOut,srgbIn.w);;
+#else 
+    return srgbIn;
+#endif
 }
 
 PsOutput ps_main(PsInput input) {
@@ -85,22 +141,62 @@ PsOutput ps_main(PsInput input) {
     
     float4 base_color = mat_data.base_color_factor;
     if (mat_data.base_color_texture_index >= 0) {
-        base_color *= a_material_textures[mat_data.base_color_texture_index].Sample(trilinear_wrap, input.uv); 
+        base_color *= a_material_textures[mat_data.base_color_texture_index + k_desc_range_offset].Sample(trilinear_wrap, input.uv);
     }
 
-    //float2 metallic_rougness_sample = a_material_textures[metallic_roughness_texture_index].Sample(trilinear_wrap, input.uv).bg * metallic_roughness_factors;
-    //float metallic = clamp(metallic_rougness_sample.r, 0.0, 1.0);
-    //float perceptual_rougness = clamp(metallic_rougness_sample.g, k_min_roughness, 1.0);
-    //float alpha_roughness = perceptual_rougness * perceptual_rougness; 
-    //float3 normal_ws = compute_normal(input, a_material_textures[normal_texture_index]);
+    float metallic = mat_data.metallic_factor;
+    float roughness = mat_data.roughness_factor;
+    if (mat_data.metallic_roughness_texture_index >= 0) {
+        float2 metallic_roughness = a_material_textures[mat_data.metallic_roughness_texture_index + k_desc_range_offset].Sample(trilinear_wrap, input.uv).bg;// WARNING! it is called metallicRoughnes texture but mapped to out of order channels: roughness -> g, metallic -> b!
+        metallic *= metallic_roughness.x;
+        roughness *= metallic_roughness.y;
+    }
+    else {
+        metallic = clamp(metallic, 0.0, 1.0);
+        roughness = clamp(roughness, k_min_roughness, 1.0);
+    }
 
-    result.color = float4(base_color.rgb * base_color.a, base_color.a); // Premultiplied alpha
-  
+    float3 normal_ws = normalize(input.normal_ws);
+    if (mat_data.normal_texture_index >= 0) {
+        normal_ws = compute_normal(input, normal_ws, a_material_textures[mat_data.normal_texture_index + k_desc_range_offset]);
+    }
+
+    float3 f0 = 0.04;
+    float3 diffuse_color = base_color.rgb * (1.0 - f0);
+    diffuse_color *=  1.0 - metallic;
+    float3 specular_color = lerp(f0, base_color.rgb, metallic);
+
+    float3 view_ws = normalize(cam_pos_ws - input.pos_ws);
+    float3 reflected_ws = -normalize(reflect(view_ws, normal_ws));
+
+    //view_ws = float3(view_ws.x, view_ws.z, -view_ws.y);
+    //reflected_ws = float3(reflected_ws.x, reflected_ws.z, -reflected_ws.y);
+    //normal_ws = float3(normal_ws.x, normal_ws.z, -normal_ws.y);
+
+    float NdotV = clamp(abs(dot(normal_ws, view_ws)), 0.001, 1.0);
+    
+    float lod = roughness * 10.0;
+	// retrieve a scale and bias to F0. See [1], Figure 3
+    float2 brdf = env_brdf_lut.Sample(bilinear_clamp, float2(NdotV, 1.0 - roughness)).xy;
+    //float2 brdf = env_brdf_lut.Sample(trilinear_wrap, float2(NdotV, 1.0 - roughness)).xy;
+    float3 diffuseLight = SRGBtoLINEAR(tone_map(env_map_irradiance.Sample(trilinear_wrap, normal_ws))).rgb;
+    float3 specularLight = SRGBtoLINEAR(tone_map(env_map_specular.SampleLevel(trilinear_wrap, reflected_ws, lod))).rgb;
+
+    float3 diffuse = diffuseLight * diffuse_color;
+    float3 specular = specularLight * (specular_color * brdf.x + brdf.y);
+
+    float3 color = 0;
+    color += diffuse + specular;
+
+    if (mat_data.emissive_texture_index >= 0) {
+        float3 emission = SRGBtoLINEAR(a_material_textures[mat_data.emissive_texture_index + k_desc_range_offset].Sample(trilinear_wrap, input.uv)).rgb;
+        color += emission;
+    }
+
+    //color = float3(brdf, 0);
+    //(specular_color * brdf.x + brdf.y);;
+
+    // Gamma correction
+    result.color = float4(pow(color.rgb, 1.0 / 2.2), base_color.a);
     return result;
 }
-
-//float3 dir_vs = normalize(input.pos_vs);
-//float3 dir_ws = normalize(mul(world_from_view, float4(dir_vs, 0.0)));
-//float3 normal_ws = normalize(input.normal_ws);
-//float3 reflected_ws = normalize(reflect(dir_ws, normal_ws)); 
-//float3 radiance = env_map.Sample(trilinear_wrap, reflected_ws).rgb *0.8;
