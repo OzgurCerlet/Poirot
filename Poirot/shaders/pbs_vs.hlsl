@@ -1,6 +1,7 @@
 
 cbuffer PerFrameConstants : register(b0) {
     float4x4 clip_from_view;
+    float4x4 view_from_clip;
     float4x4 view_from_world;
     float4x4 world_from_view;
     float3 cam_pos_ws;

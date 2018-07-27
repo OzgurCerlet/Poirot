@@ -42,7 +42,7 @@ using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 using namespace std;
 
-#define CHECK_D3D12_CALL(x)	{if(FAILED(x)) { throw std::exception(_STRINGIZE(x));}};
+#define CHECK_D3D12_CALL(x, y)	{string err_0 = y; string err_1 = _STRINGIZE(x); if(FAILED(x)) { err_0 += err_1; throw std::exception(err_0.c_str());}};
 #define CHECK_DXGI_CALL(x)	{if(FAILED(x)) { throw std::exception(_STRINGIZE(x));}};
 #define CHECK_WIN32_CALL(x)	check_win32_call(x);
 
@@ -53,6 +53,9 @@ constexpr uint8_t max_inflight_frame_count = 3;
 constexpr uint16_t back_buffer_width = 1280;
 constexpr uint16_t back_buffer_height = 720;
 constexpr DXGI_FORMAT back_buffer_format = DXGI_FORMAT_R8G8B8A8_UNORM;
+constexpr uint8_t ms_count = 1;
+constexpr uint8_t ms_quality = 0;
+bool is_msaa_enabled = false;
 
 unique_ptr<Window> unq_window = nullptr;
 unique_ptr<Gui> unq_gui = nullptr;
@@ -66,7 +69,7 @@ ComPtr<ID3D12DescriptorHeap> com_rtv_heap = nullptr;
 ComPtr<ID3D12DescriptorHeap> com_dsv_heap = nullptr;
 //ComPtr<ID3D12DescriptorHeap> com_cbv_srv_uav_heap = nullptr;
 
-array<ComPtr<ID3D12Resource>, max_inflight_frame_count> a_com_render_targets = {};
+array<ComPtr<ID3D12Resource>, max_inflight_frame_count + 1> a_com_render_targets = {};
 ComPtr<ID3D12Resource> com_dsv = nullptr;
 uint16_t rtv_descriptor_size = 0;
 
@@ -77,13 +80,16 @@ array<uint64_t, max_inflight_frame_count> a_fence_values = {};
 ComPtr<ID3D12Fence> com_fence = nullptr;
 HANDLE h_fence_event = 0;
 
-ComPtr<ID3D12PipelineState> com_default_pipeline_state_object = nullptr;
-ComPtr<ID3D12PipelineState> com_alpha_blend_pipeline_state_object = nullptr;
+ComPtr<ID3D12PipelineState> com_scene_opaque_pso = nullptr;
+ComPtr<ID3D12PipelineState> com_scene_alpha_blend_pso = nullptr;
+ComPtr<ID3D12PipelineState> com_background_pso = nullptr;
+ComPtr<ID3D12PipelineState> com_final_pso = nullptr;
 ComPtr<ID3D12RootSignature> com_root_signature = nullptr;
 
 struct PerFrameConstantBuffer {
 	__declspec(align(256)) struct {
 		XMFLOAT4X4 clip_from_view;
+		XMFLOAT4X4 view_from_clip;
 		XMFLOAT4X4 view_from_world;
 		XMFLOAT4X4 world_from_view;
 		XMFLOAT3   cam_pos_ws;
@@ -147,8 +153,17 @@ struct Mesh {
 struct Texture {
 	ComPtr<ID3D12Resource> com_resource;
 	ComPtr<ID3D12Resource> com_upload;
-	uint32_t descriptor_table_index;
+	uint32_t srv_descriptor_table_index;
 };
+
+struct RenderBuffer {
+	ComPtr<ID3D12Resource> com_resource;
+	uint32_t srv_descriptor_table_index;
+	uint32_t rtv_descriptor_table_index;
+};
+
+array<RenderBuffer, max_inflight_frame_count> a_back_buffers;
+RenderBuffer hdr_buffer;
 
 struct Material {
 	enum AlphaMode { ALPHAMODE_OPAQUE, ALPHAMODE_MASK, ALPHAMODE_BLEND };
@@ -220,6 +235,7 @@ struct Scene {
 
 struct Camera {
 	XMFLOAT4X4 clip_from_view;
+	XMFLOAT4X4 view_from_clip;
 	XMFLOAT4X4 view_from_world;
 	XMFLOAT4X4 world_from_view;
 
@@ -254,7 +270,7 @@ struct DescriptorHeap{
 		desc.NumDescriptors = num_max_descriptors;
 		desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 		desc.Flags = is_shader_visible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-		CHECK_D3D12_CALL(com_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&com_heap)));
+		CHECK_D3D12_CALL(com_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&com_heap)),"");
 
 		descriptor_increment_size = com_device->GetDescriptorHandleIncrementSize(type);
 		base_descriptor = com_heap->GetGPUDescriptorHandleForHeapStart();
@@ -302,18 +318,18 @@ inline void set_name(ComPtr<ID3D12Resource> &com_resource, string name) {
 }
 
 void wait_for_gpu() {
-	CHECK_D3D12_CALL(com_command_queue->Signal(com_fence.Get(), a_fence_values[frame_index]));
-	CHECK_D3D12_CALL(com_fence->SetEventOnCompletion(a_fence_values[frame_index], h_fence_event));
+	CHECK_D3D12_CALL(com_command_queue->Signal(com_fence.Get(), a_fence_values[frame_index]),"");
+	CHECK_D3D12_CALL(com_fence->SetEventOnCompletion(a_fence_values[frame_index], h_fence_event),"");
 	WaitForSingleObjectEx(h_fence_event, INFINITE, FALSE);
 	a_fence_values[frame_index]++;
 }
 
 void prepare_next_frame() {
 	uint64_t current_fence_value = a_fence_values[frame_index];
-	CHECK_D3D12_CALL(com_command_queue->Signal(com_fence.Get(), current_fence_value));
+	CHECK_D3D12_CALL(com_command_queue->Signal(com_fence.Get(), current_fence_value),"");
 	frame_index = com_swap_chain->GetCurrentBackBufferIndex();
 	if(com_fence->GetCompletedValue() < a_fence_values[frame_index]) {
-		CHECK_D3D12_CALL(com_fence->SetEventOnCompletion(a_fence_values[frame_index], h_fence_event));
+		CHECK_D3D12_CALL(com_fence->SetEventOnCompletion(a_fence_values[frame_index], h_fence_event),"");
 		WaitForSingleObjectEx(h_fence_event, INFINITE, FALSE);
 	}
 
@@ -342,10 +358,10 @@ void load_mesh(uint32_t vertex_count, uint32_t index_count, const void *p_vertex
 		resource_desc.SampleDesc.Count = 1;
 		resource_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-		CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&mesh.com_vertex_buffer)));
+		CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&mesh.com_vertex_buffer)), "");
 		set_name(mesh.com_vertex_buffer, _STRINGIZE(__LINE__));
 		heap_properties.Type = D3D12_HEAP_TYPE_UPLOAD;
-		CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mesh.com_vertex_upload_buffer)));
+		CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mesh.com_vertex_upload_buffer)), "");
 
 		D3D12_RESOURCE_BARRIER resource_barrier = {};
 		resource_barrier.Transition.pResource = mesh.com_vertex_buffer.Get();
@@ -354,7 +370,7 @@ void load_mesh(uint32_t vertex_count, uint32_t index_count, const void *p_vertex
 		com_command_list->ResourceBarrier(1, &resource_barrier);
 
 		void *p_data = nullptr;
-		CHECK_D3D12_CALL(mesh.com_vertex_upload_buffer->Map(0, nullptr, &p_data));
+		CHECK_D3D12_CALL(mesh.com_vertex_upload_buffer->Map(0, nullptr, &p_data), "");
 		memcpy(p_data, p_vertex_data, vertex_buffer_size);
 		mesh.com_vertex_upload_buffer->Unmap(0, nullptr);
 		com_command_list->CopyBufferRegion(mesh.com_vertex_buffer.Get(), 0, mesh.com_vertex_upload_buffer.Get(), 0, vertex_buffer_size);
@@ -381,10 +397,10 @@ void load_mesh(uint32_t vertex_count, uint32_t index_count, const void *p_vertex
 		resource_desc.SampleDesc.Count = 1;
 		resource_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-		CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&mesh.com_index_buffer)));
+		CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&mesh.com_index_buffer)),"");
 		set_name(mesh.com_vertex_buffer, _STRINGIZE(__LINE__));
 		heap_properties.Type = D3D12_HEAP_TYPE_UPLOAD;
-		CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mesh.com_index_upload_buffer)));
+		CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mesh.com_index_upload_buffer)),"");
 
 		D3D12_RESOURCE_BARRIER resource_barrier = {};
 		resource_barrier.Transition.pResource = mesh.com_index_buffer.Get();
@@ -393,7 +409,7 @@ void load_mesh(uint32_t vertex_count, uint32_t index_count, const void *p_vertex
 		com_command_list->ResourceBarrier(1, &resource_barrier);
 
 		void *p_data = nullptr;
-		CHECK_D3D12_CALL(mesh.com_index_upload_buffer->Map(0, nullptr, &p_data));
+		CHECK_D3D12_CALL(mesh.com_index_upload_buffer->Map(0, nullptr, &p_data),"");
 		memcpy(p_data, p_index_data, index_buffer_size);
 		mesh.com_index_upload_buffer->Unmap(0, nullptr);
 		com_command_list->CopyBufferRegion(mesh.com_index_buffer.Get(), 0, mesh.com_index_upload_buffer.Get(), 0, index_buffer_size);
@@ -455,7 +471,7 @@ void load_texture(OctarineImageHeader header, string texture_name, void *p_src_d
 	resource_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 	resource_desc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
-	CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&tex.com_resource)));
+	CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&tex.com_resource)),"");
 	set_name(tex.com_resource, _STRINGIZE(__LINE__));
 
 	heap_properties.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -478,7 +494,7 @@ void load_texture(OctarineImageHeader header, string texture_name, void *p_src_d
 	upload_resource_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 	upload_resource_desc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
-	CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &upload_resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&tex.com_upload)));
+	CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &upload_resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&tex.com_upload)),"");
 
 	D3D12_RESOURCE_BARRIER resource_barrier = {};
 	resource_barrier.Transition.pResource = tex.com_resource.Get();
@@ -488,7 +504,7 @@ void load_texture(OctarineImageHeader header, string texture_name, void *p_src_d
 	com_command_list->ResourceBarrier(1, &resource_barrier);
 
 	void *p_dst_data = nullptr;
-	CHECK_D3D12_CALL(tex.com_upload->Map(0, nullptr, &p_dst_data));
+	CHECK_D3D12_CALL(tex.com_upload->Map(0, nullptr, &p_dst_data),"");
 	for(UINT subresource_index = 0; subresource_index < num_subresources; ++subresource_index) {
 		D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprint = p_dst_footprints[subresource_index];
 		UINT num_subresource_slices = subresource_footprint.Footprint.Depth;
@@ -544,7 +560,7 @@ void load_texture(OctarineImageHeader header, string texture_name, void *p_src_d
 
 		D3D12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handle = cbv_srv_uav_desc_heap.get_cpu_handle(cbv_srv_uav_desc_heap.num_used_descriptors);
 		com_device->CreateShaderResourceView(tex.com_resource.Get(), &srv_desc, cpu_descriptor_handle);
-		tex.descriptor_table_index = cbv_srv_uav_desc_heap.num_used_descriptors++;	
+		tex.srv_descriptor_table_index = cbv_srv_uav_desc_heap.num_used_descriptors++;	
 	}
 }
 
@@ -661,8 +677,9 @@ void load_texture(tinygltf::Image &image, bool is_srgb, Texture &tex) {
 void load_textures(tinygltf::Model &gltf_model, Scene& scene) {
 	
 	vector<int> srgb_image_indices;
+	srgb_image_indices.reserve(gltf_model.images.size());
 
-	for(tinygltf::Material &material : gltf_model.materials) {
+	for(auto &material : gltf_model.materials) {
 		auto it = material.values.find("baseColorTexture");
 		if(it != material.values.end()) {
 			srgb_image_indices.push_back(gltf_model.textures[it->second.TextureIndex()].source);
@@ -678,7 +695,7 @@ void load_textures(tinygltf::Model &gltf_model, Scene& scene) {
 	};
 
 	int image_index = 0;
-	for(tinygltf::Image &image : gltf_model.images) {
+	for(auto &image : gltf_model.images) {
 		Texture* p_tex = new Texture;
 		load_texture(image, is_srgb(image_index++), *p_tex);
 		scene.textures.push_back(p_tex);
@@ -687,7 +704,7 @@ void load_textures(tinygltf::Model &gltf_model, Scene& scene) {
 
 void load_materials(tinygltf::Model &gltf_model, Scene &scene) {
 	uint32_t material_index = 0;
-	for(tinygltf::Material &mat : gltf_model.materials) {
+	for(auto &mat : gltf_model.materials) {
 		Material *p_material = new Material();
 		MaterialData *p_material_data = &material_data_cb.constants.a_material_data[material_index];
 		p_material->index_into_desc_heap = cbv_srv_uav_desc_heap.num_used_descriptors;
@@ -696,35 +713,35 @@ void load_materials(tinygltf::Model &gltf_model, Scene &scene) {
 		if( it != mat.values.end()) {
 			Texture *p_texture = scene.textures[gltf_model.textures[it->second.TextureIndex()].source];
 			p_material->basecolor_texture = p_texture;
-			p_material_data->base_color_texture_index = p_texture->descriptor_table_index;
+			p_material_data->base_color_texture_index = p_texture->srv_descriptor_table_index;
 		}
 		
 		it = mat.additionalValues.find("normalTexture");
 		if(it != mat.additionalValues.end()) {
 			Texture *p_texture = scene.textures[gltf_model.textures[it->second.TextureIndex()].source];
 			p_material->normal_texture = p_texture;
-			p_material_data->normal_texture_index = p_texture->descriptor_table_index;;
+			p_material_data->normal_texture_index = p_texture->srv_descriptor_table_index;;
 		}
 		
 		it = mat.additionalValues.find("occlusionTexture");
 		if(it != mat.additionalValues.end()) {
 			Texture *p_texture = scene.textures[gltf_model.textures[it->second.TextureIndex()].source];
 			p_material->occlusion_texture = p_texture;
-			p_material_data->occlusion_texture_index = p_texture->descriptor_table_index;
+			p_material_data->occlusion_texture_index = p_texture->srv_descriptor_table_index;
 		}
 		
 		it = mat.values.find("metallicRoughnessTexture");
 		if(it != mat.values.end()) {
 			Texture *p_texture = scene.textures[gltf_model.textures[it->second.TextureIndex()].source];
 			p_material->metallic_roughness_texture = p_texture;
-			p_material_data->metallic_roughness_texture_index = p_texture->descriptor_table_index;
+			p_material_data->metallic_roughness_texture_index = p_texture->srv_descriptor_table_index;
 		}
 		
 		it = mat.additionalValues.find("emissiveTexture");
 		if(it != mat.additionalValues.end()) {
 			Texture *p_texture = scene.textures[gltf_model.textures[it->second.TextureIndex()].source];
 			p_material->emissive_texture = p_texture;
-			p_material_data->emissive_texture_index = p_texture->descriptor_table_index;
+			p_material_data->emissive_texture_index = p_texture->srv_descriptor_table_index;
 		}
 		
 		it = mat.values.find("roughnessFactor");
@@ -767,7 +784,6 @@ void load_materials(tinygltf::Model &gltf_model, Scene &scene) {
 		scene.materials.push_back(p_material);
 		++material_index;
 	}
-
 }
 
 void load_node(Node *p_parent, const tinygltf::Node &node, uint32_t node_index, const tinygltf::Model &model, vector<uint32_t>& index_buffer, vector<Vertex>& vertex_buffer, Scene& scene) {
@@ -989,10 +1005,10 @@ void create_root_signature() {
 	// srv desc table parameter
 	D3D12_DESCRIPTOR_RANGE1 a_srv_descriptor_ranges[2] = {};
 	a_srv_descriptor_ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	a_srv_descriptor_ranges[0].NumDescriptors = env_maps.size();
+	a_srv_descriptor_ranges[0].NumDescriptors = env_maps.size()+1;
 	a_srv_descriptor_ranges[0].BaseShaderRegister = 0;
 	a_srv_descriptor_ranges[0].RegisterSpace = 0;
-	a_srv_descriptor_ranges[0].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
+	a_srv_descriptor_ranges[0].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
 	a_srv_descriptor_ranges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
 	a_srv_descriptor_ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -1049,24 +1065,30 @@ void create_root_signature() {
 
 	ComPtr<ID3DBlob> signature;
 	ComPtr<ID3DBlob> error;
-	CHECK_D3D12_CALL(D3D12SerializeVersionedRootSignature(&root_signature_desc, &signature, &error));
-	//D3D12SerializeVersionedRootSignature(&root_signature_desc, &signature, &error);
-	// if(error)void *p = error->GetBufferPointer();
-	CHECK_D3D12_CALL(com_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&com_root_signature)));
+	CHECK_D3D12_CALL(D3D12SerializeVersionedRootSignature(&root_signature_desc, &signature, &error), error ? (char*)error->GetBufferPointer() : "");
+	CHECK_D3D12_CALL(com_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&com_root_signature)),"");
 }
 
-void create_pipeline_state_object() {
+void create_pipeline_state_objects() {
 	ComPtr<ID3DBlob> com_vertex_shader;
 	ComPtr<ID3DBlob> com_pixel_shader;
+	ComPtr<ID3DBlob> com_full_screen_shader;
+	ComPtr<ID3DBlob> com_background_shader;
+	ComPtr<ID3DBlob> com_copy_shader;
+	ComPtr<ID3DBlob> error;
+
 	uint32_t compile_flags = D3DCOMPILE_PACK_MATRIX_ROW_MAJOR | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
 #if defined(_DEBUG)
 	// Enable better shader debugging with the graphics debugging tools.
 	compile_flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION ;
 #endif
 
-	CHECK_D3D12_CALL(D3DCompileFromFile(L"shaders/basic_vs.hlsl", nullptr, nullptr, "vs_main", "vs_5_1", compile_flags, 0, &com_vertex_shader, nullptr));
-	CHECK_D3D12_CALL(D3DCompileFromFile(L"shaders/basic_ps.hlsl", nullptr, nullptr, "ps_main", "ps_5_1", compile_flags, 0, &com_pixel_shader, nullptr));
-	
+	CHECK_D3D12_CALL(D3DCompileFromFile(L"shaders/pbs_vs.hlsl", nullptr, nullptr, "vs_main", "vs_5_1", compile_flags, 0, &com_vertex_shader, &error), error ? (char*)error->GetBufferPointer() : "");
+	CHECK_D3D12_CALL(D3DCompileFromFile(L"shaders/pbs_ps.hlsl", nullptr, nullptr, "ps_main", "ps_5_1", compile_flags, 0, &com_pixel_shader, &error), error ? (char*)error->GetBufferPointer() : "");
+	CHECK_D3D12_CALL(D3DCompileFromFile(L"shaders/full_screen_vs.hlsl", nullptr, nullptr, "vs_main", "vs_5_1", compile_flags, 0, &com_full_screen_shader, &error), error ? (char*)error->GetBufferPointer() : "");
+	CHECK_D3D12_CALL(D3DCompileFromFile(L"shaders/background_ps.hlsl", nullptr, nullptr, "ps_main", "ps_5_1", compile_flags, 0, &com_background_shader, &error), error ? (char*)error->GetBufferPointer() : "");
+	CHECK_D3D12_CALL(D3DCompileFromFile(L"shaders/copy_ps.hlsl", nullptr, nullptr, "ps_main", "ps_5_1", compile_flags, 0, &com_copy_shader, &error), error ? (char*)error->GetBufferPointer() : "");
+
 	D3D12_INPUT_ELEMENT_DESC a_input_element_descs[] = {
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -1107,6 +1129,10 @@ void create_pipeline_state_object() {
 	alpha_blend_depth_stencil_desc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
 	alpha_blend_depth_stencil_desc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
+	D3D12_DEPTH_STENCIL_DESC background_depth_stencil_desc = {};
+	background_depth_stencil_desc.DepthEnable = FALSE;
+	background_depth_stencil_desc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+
 	{
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC pso_desc = {};
 		pso_desc.InputLayout = { a_input_element_descs, static_cast<UINT>(count_of(a_input_element_descs)) };
@@ -1119,10 +1145,11 @@ void create_pipeline_state_object() {
 		pso_desc.SampleMask = UINT_MAX;
 		pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		pso_desc.NumRenderTargets = 1;
-		pso_desc.RTVFormats[0] = back_buffer_format;
+		pso_desc.RTVFormats[0] = a_com_render_targets[max_inflight_frame_count]->GetDesc().Format;
 		pso_desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-		pso_desc.SampleDesc.Count = 1;
-		CHECK_D3D12_CALL(com_device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&com_default_pipeline_state_object)));
+		pso_desc.SampleDesc.Count = ms_count;
+		pso_desc.SampleDesc.Quality = ms_quality;
+		CHECK_D3D12_CALL(com_device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&com_scene_opaque_pso)),"");
 	}
 
 	{
@@ -1137,10 +1164,49 @@ void create_pipeline_state_object() {
 		pso_desc.SampleMask = UINT_MAX;
 		pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		pso_desc.NumRenderTargets = 1;
-		pso_desc.RTVFormats[0] = back_buffer_format;
+		pso_desc.RTVFormats[0] = a_com_render_targets[max_inflight_frame_count]->GetDesc().Format;
+		pso_desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+		pso_desc.SampleDesc.Count = ms_count;
+		pso_desc.SampleDesc.Quality = ms_quality;
+		CHECK_D3D12_CALL(com_device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&com_scene_alpha_blend_pso)), "");
+	}
+
+	{
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC pso_desc = {};
+		pso_desc.InputLayout = { a_input_element_descs, static_cast<UINT>(count_of(a_input_element_descs)) };
+		pso_desc.pRootSignature = com_root_signature.Get();
+		pso_desc.VS = { com_full_screen_shader->GetBufferPointer(), com_full_screen_shader->GetBufferSize() };
+		pso_desc.PS = { com_background_shader->GetBufferPointer(), com_background_shader->GetBufferSize() };
+		pso_desc.RasterizerState = default_rasterizer_desc;
+		pso_desc.BlendState = default_blend_desc;
+		pso_desc.DepthStencilState = background_depth_stencil_desc;
+		pso_desc.SampleMask = UINT_MAX;
+		pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		pso_desc.NumRenderTargets = 1;
+		pso_desc.RTVFormats[0] = a_com_render_targets[max_inflight_frame_count]->GetDesc().Format;
+		pso_desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+		pso_desc.SampleDesc.Count = ms_count;
+		pso_desc.SampleDesc.Quality = ms_quality;
+		CHECK_D3D12_CALL(com_device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&com_background_pso)), "");
+	}
+
+	{
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC pso_desc = {};
+		pso_desc.InputLayout = { a_input_element_descs, static_cast<UINT>(count_of(a_input_element_descs)) };
+		pso_desc.pRootSignature = com_root_signature.Get();
+		pso_desc.VS = { com_full_screen_shader->GetBufferPointer(), com_full_screen_shader->GetBufferSize() };
+		pso_desc.PS = { com_copy_shader->GetBufferPointer(), com_copy_shader->GetBufferSize() };
+		pso_desc.RasterizerState = default_rasterizer_desc;
+		pso_desc.BlendState = default_blend_desc;
+		pso_desc.DepthStencilState = background_depth_stencil_desc;
+		pso_desc.SampleMask = UINT_MAX;
+		pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		pso_desc.NumRenderTargets = 1;
+		pso_desc.RTVFormats[0] = a_com_render_targets[0]->GetDesc().Format;
 		pso_desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 		pso_desc.SampleDesc.Count = 1;
-		CHECK_D3D12_CALL(com_device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&com_alpha_blend_pipeline_state_object)));
+		pso_desc.SampleDesc.Quality = 0;
+		CHECK_D3D12_CALL(com_device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&com_final_pso)), "");
 	}
 
 }
@@ -1203,7 +1269,7 @@ void init(HINSTANCE h_instance) {
 		{
 			D3D12_COMMAND_QUEUE_DESC command_queue_desc = {};
 			command_queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-			CHECK_D3D12_CALL(com_device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&com_command_queue)));
+			CHECK_D3D12_CALL(com_device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&com_command_queue)), "");
 
 			ComPtr<IDXGISwapChain1> com_temp_swap_chain = nullptr;
 			DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {};
@@ -1221,12 +1287,17 @@ void init(HINSTANCE h_instance) {
 		}
 
 		{
+			//local_desc_heap.init();
+			cbv_srv_uav_desc_heap.init();
+		}
+
+		{
 			rtv_descriptor_size = com_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
 			D3D12_DESCRIPTOR_HEAP_DESC rtv_heap_desc = {};
 			rtv_heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-			rtv_heap_desc.NumDescriptors = max_inflight_frame_count;
-			CHECK_D3D12_CALL(com_device->CreateDescriptorHeap(&rtv_heap_desc, IID_PPV_ARGS(&com_rtv_heap)));
+			rtv_heap_desc.NumDescriptors = max_inflight_frame_count+1;
+			CHECK_D3D12_CALL(com_device->CreateDescriptorHeap(&rtv_heap_desc, IID_PPV_ARGS(&com_rtv_heap)), "");
 
 			D3D12_CPU_DESCRIPTOR_HANDLE rtv_cpu_handle = { com_rtv_heap->GetCPUDescriptorHandleForHeapStart() };
 			for(int buffer_index = 0; buffer_index < max_inflight_frame_count; ++buffer_index) {
@@ -1234,18 +1305,52 @@ void init(HINSTANCE h_instance) {
 				com_device->CreateRenderTargetView(a_com_render_targets[buffer_index].Get(), nullptr, rtv_cpu_handle);
 				rtv_cpu_handle.ptr += rtv_descriptor_size;
 			}
+
+			D3D12_HEAP_PROPERTIES heap_properties = {};
+			heap_properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+			D3D12_CLEAR_VALUE clear_value = {};
+			clear_value.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+
+			D3D12_RESOURCE_DESC resource_desc = {};
+			resource_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+			resource_desc.Width = back_buffer_width;
+			resource_desc.Height = back_buffer_height;
+			resource_desc.DepthOrArraySize = 1;
+			resource_desc.MipLevels = 1;
+			resource_desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+			resource_desc.SampleDesc.Count = ms_count;
+			resource_desc.SampleDesc.Quality = ms_quality;
+			resource_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+			resource_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+			CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &clear_value, IID_PPV_ARGS(&(a_com_render_targets[max_inflight_frame_count]))), "");
+
+			D3D12_RENDER_TARGET_VIEW_DESC desc = {};
+			desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+			desc.ViewDimension = is_msaa_enabled ? D3D12_RTV_DIMENSION_TEXTURE2DMS : D3D12_RTV_DIMENSION_TEXTURE2D;
+			com_device->CreateRenderTargetView(a_com_render_targets[max_inflight_frame_count].Get(), &desc, rtv_cpu_handle);
+	
+			D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+			srv_desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+			srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			srv_desc.ViewDimension = is_msaa_enabled ? D3D12_SRV_DIMENSION_TEXTURE2DMS : D3D12_SRV_DIMENSION_TEXTURE2D;
+			srv_desc.Texture2D.MostDetailedMip = 0;
+			srv_desc.Texture2D.MipLevels = -1;
+			srv_desc.Texture2D.PlaneSlice = 0;
+			srv_desc.Texture2D.ResourceMinLODClamp = 0;
+			D3D12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handle = cbv_srv_uav_desc_heap.get_cpu_handle(cbv_srv_uav_desc_heap.num_used_descriptors++);
+			com_device->CreateShaderResourceView(a_com_render_targets[max_inflight_frame_count].Get(), &srv_desc, cpu_descriptor_handle);
 		}
 
 		{
 			for(uint8_t allocator_index = 0; allocator_index < a_com_command_allocators.size(); ++allocator_index) {
-				CHECK_D3D12_CALL(com_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&(a_com_command_allocators[allocator_index]))));
+				CHECK_D3D12_CALL(com_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&(a_com_command_allocators[allocator_index]))),"");
 			}
 
-			CHECK_D3D12_CALL(com_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE::D3D12_COMMAND_LIST_TYPE_DIRECT, a_com_command_allocators[0].Get(), nullptr, IID_PPV_ARGS(&com_command_list)));
+			CHECK_D3D12_CALL(com_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE::D3D12_COMMAND_LIST_TYPE_DIRECT, a_com_command_allocators[0].Get(), nullptr, IID_PPV_ARGS(&com_command_list)),"");
 		}
 
 		{
-			CHECK_D3D12_CALL(com_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&com_fence)));
+			CHECK_D3D12_CALL(com_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&com_fence)),"");
 			a_fence_values[frame_index]++;
 			CHECK_WIN32_CALL(CreateEvent(nullptr, FALSE, FALSE, nullptr));
 		}
@@ -1256,11 +1361,11 @@ void init(HINSTANCE h_instance) {
 			D3D12_DESCRIPTOR_HEAP_DESC dsv_heap_desc = {};
 			dsv_heap_desc.NumDescriptors = 1;
 			dsv_heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-			CHECK_D3D12_CALL(com_device->CreateDescriptorHeap(&dsv_heap_desc, IID_PPV_ARGS(&com_dsv_heap)));
+			CHECK_D3D12_CALL(com_device->CreateDescriptorHeap(&dsv_heap_desc, IID_PPV_ARGS(&com_dsv_heap)),"");
 
 			D3D12_DEPTH_STENCIL_VIEW_DESC dsv_desc = {};
 			dsv_desc.Format = DXGI_FORMAT_D32_FLOAT;
-			dsv_desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+			dsv_desc.ViewDimension = is_msaa_enabled ? D3D12_DSV_DIMENSION_TEXTURE2DMS : D3D12_DSV_DIMENSION_TEXTURE2D;
 			dsv_desc.Flags = D3D12_DSV_FLAG_NONE;
 
 			D3D12_CLEAR_VALUE dsc_clear_value = {};
@@ -1276,11 +1381,12 @@ void init(HINSTANCE h_instance) {
 			resource_desc.DepthOrArraySize = 1;
 			resource_desc.MipLevels = 1;
 			resource_desc.Format = DXGI_FORMAT_D32_FLOAT;
-			resource_desc.SampleDesc.Count = 1;
+			resource_desc.SampleDesc.Count = ms_count;
+			resource_desc.SampleDesc.Quality = ms_quality;
 			resource_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 			resource_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
-			CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &dsc_clear_value, IID_PPV_ARGS(&com_dsv)));
+			CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &dsc_clear_value, IID_PPV_ARGS(&com_dsv)),"");
 			com_device->CreateDepthStencilView(com_dsv.Get(), &dsv_desc, com_dsv_heap->GetCPUDescriptorHandleForHeapStart());
 		}
 
@@ -1299,7 +1405,7 @@ void init(HINSTANCE h_instance) {
 				resource_desc.SampleDesc.Count = 1;
 				resource_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-				CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&per_frame_cb.com_buffer)));
+				CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&per_frame_cb.com_buffer)),"");
 				D3D12_RANGE cpu_visible_range = { 0, 0 };
 				per_frame_cb.com_buffer->Map(0, &cpu_visible_range, &per_frame_cb.cpu_virtual_address);
 				per_frame_cb.gpu_virtual_address = per_frame_cb.com_buffer->GetGPUVirtualAddress();
@@ -1318,7 +1424,7 @@ void init(HINSTANCE h_instance) {
 				resource_desc.SampleDesc.Count = 1;
 				resource_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-				CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&transformations_cb.com_buffer)));
+				CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&transformations_cb.com_buffer)),"");
 				D3D12_RANGE cpu_visible_range = { 0, 0 };
 				transformations_cb.com_buffer->Map(0, &cpu_visible_range, &transformations_cb.cpu_virtual_address);
 				transformations_cb.gpu_virtual_address = transformations_cb.com_buffer->GetGPUVirtualAddress();
@@ -1337,17 +1443,12 @@ void init(HINSTANCE h_instance) {
 				resource_desc.SampleDesc.Count = 1;
 				resource_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-				CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&material_data_cb.com_buffer)));
+				CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&material_data_cb.com_buffer)),"");
 				D3D12_RANGE cpu_visible_range = { 0, 0 };
 				material_data_cb.com_buffer->Map(0, &cpu_visible_range, &material_data_cb.cpu_virtual_address);
 				material_data_cb.gpu_virtual_address = material_data_cb.com_buffer->GetGPUVirtualAddress();
 			}
 
-		}
-
-		{
-			//local_desc_heap.init();
-			cbv_srv_uav_desc_heap.init();
 		}
 
 		{
@@ -1390,15 +1491,13 @@ void init(HINSTANCE h_instance) {
 
 		{ 
 			create_root_signature();
-			create_pipeline_state_object();
+			create_pipeline_state_objects();
 		}
 
-		CHECK_D3D12_CALL(com_command_list->Close());
+		CHECK_D3D12_CALL(com_command_list->Close(),"");
 		ID3D12CommandList* pp_command_lists[] = { com_command_list.Get() };
 		com_command_queue->ExecuteCommandLists(count_of(pp_command_lists), pp_command_lists);
 		wait_for_gpu();
-
-
 	}
 
 
@@ -1419,7 +1518,10 @@ void init(HINSTANCE h_instance) {
 		camera.up_ws = { 0.0, 0.0, 1.0 };
 
 		XMMATRIX xm_clip_from_view = XMMatrixTranspose(XMMatrixPerspectiveFovLH(XMConvertToRadians(camera.vertical_fov_in_degrees), camera.aspect_ratio, camera.near_plane_in_meters, camera.far_plane_in_meters));
+		XMVECTOR determinant;
+		XMMATRIX xm_view_from_clip = XMMatrixInverse(&determinant, xm_clip_from_view);
 		XMStoreFloat4x4(&camera.clip_from_view, xm_clip_from_view);
+		XMStoreFloat4x4(&camera.view_from_clip, xm_view_from_clip);
 
 		XMMATRIX xm_clip_from_world;
 		{
@@ -1556,6 +1658,7 @@ void update() {
 		}
 
 		per_frame_cb.constants.clip_from_view = camera.clip_from_view;
+		per_frame_cb.constants.view_from_clip = camera.view_from_clip;
 		per_frame_cb.constants.view_from_world = camera.view_from_world;
 		per_frame_cb.constants.world_from_view = camera.world_from_view;
 		per_frame_cb.constants.cam_pos_ws = camera.pos_ws;
@@ -1592,7 +1695,6 @@ void render_node(const Node &node, Material::AlphaMode alpha_mode) {
 			if(p_material->alphaMode != alpha_mode) continue;
 			uint32_t a_root_constants[] = { node.transformation_index, primitive.material_index };
 			com_command_list->SetGraphicsRoot32BitConstants(0, count_of(a_root_constants), a_root_constants, 0);
-			com_command_list->SetGraphicsRootDescriptorTable(4, cbv_srv_uav_desc_heap.base_descriptor);
 			com_command_list->DrawIndexedInstanced(primitive.index_count, 1, primitive.first_index, 0, 0);
 		}
 	}
@@ -1603,10 +1705,10 @@ void render_node(const Node &node, Material::AlphaMode alpha_mode) {
 }
 
 void render_frame() {
-	float clear_color[] = { 130.f / 255.f, 171.f / 255.f, 237.f / 255.f, 1.0f };
+	float clear_color[] = { 0.f, 0.f, 0.f, 0.f };
 
-	CHECK_D3D12_CALL(a_com_command_allocators[frame_index]->Reset());
-	CHECK_D3D12_CALL(com_command_list->Reset(a_com_command_allocators[frame_index].Get(), com_default_pipeline_state_object.Get()));
+	CHECK_D3D12_CALL(a_com_command_allocators[frame_index]->Reset(),"");
+	CHECK_D3D12_CALL(com_command_list->Reset(a_com_command_allocators[frame_index].Get(), com_background_pso.Get()),"");
 
 	com_command_list->SetGraphicsRootSignature(com_root_signature.Get());
 	D3D12_VIEWPORT viewport = {};
@@ -1625,43 +1727,69 @@ void render_frame() {
 	resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	com_command_list->ResourceBarrier(1, &resource_barrier);
 
+	resource_barrier.Transition.pResource = a_com_render_targets[max_inflight_frame_count].Get();
+	resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+	resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	com_command_list->ResourceBarrier(1, &resource_barrier);
+
 	// Draw Scene
 	ID3D12DescriptorHeap *a_heaps[] = { cbv_srv_uav_desc_heap.com_heap.Get() };
 	com_command_list->SetDescriptorHeaps(count_of(a_heaps), a_heaps);
 	com_command_list->SetGraphicsRootConstantBufferView(1, per_frame_cb.gpu_virtual_address + sizeof(per_frame_cb.constants) * frame_index);
 	com_command_list->SetGraphicsRootConstantBufferView(2, transformations_cb.gpu_virtual_address + sizeof(transformations_cb.constants) * frame_index);
 	com_command_list->SetGraphicsRootConstantBufferView(3, material_data_cb.gpu_virtual_address + sizeof(material_data_cb.constants) * frame_index);
+	com_command_list->SetGraphicsRootDescriptorTable(4, cbv_srv_uav_desc_heap.base_descriptor);
 
 	// Clear the background to a random color
 	D3D12_CPU_DESCRIPTOR_HANDLE rtv_cpu_handle(com_rtv_heap->GetCPUDescriptorHandleForHeapStart());
-	rtv_cpu_handle.ptr += frame_index * com_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	rtv_cpu_handle.ptr += max_inflight_frame_count * com_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 	D3D12_CPU_DESCRIPTOR_HANDLE dsv_cpu_handle(com_dsv_heap->GetCPUDescriptorHandleForHeapStart());
 	com_command_list->OMSetRenderTargets(1, &rtv_cpu_handle, FALSE, &dsv_cpu_handle);
 	com_command_list->ClearRenderTargetView(rtv_cpu_handle, clear_color, 0, nullptr);
 	com_command_list->ClearDepthStencilView(dsv_cpu_handle, D3D12_CLEAR_FLAG_DEPTH, 1.0, 0, 0, NULL);
-	com_command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	// Draw mesh
+	// Draw Background
+	com_command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+	com_command_list->DrawInstanced(4, 1, 0, 0);
+	
+	// Draw Opaque objects
+	com_command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	com_command_list->SetPipelineState(com_scene_opaque_pso.Get());
 	for(auto node : scene.nodes) {
 		render_node(*node, Material::ALPHAMODE_OPAQUE);
 	}
 	
-	com_command_list->SetPipelineState(com_alpha_blend_pipeline_state_object.Get());
-
+	// Draw Alpha Blended objects
+	com_command_list->SetPipelineState(com_scene_alpha_blend_pso.Get());
 	for(auto node : scene.nodes) {
 		render_node(*node, Material::ALPHAMODE_BLEND);
 	}
 
+	// Copy
+	resource_barrier.Transition.pResource = a_com_render_targets[max_inflight_frame_count].Get();
+	resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+	com_command_list->ResourceBarrier(1, &resource_barrier);
+
+	com_command_list->SetPipelineState(com_final_pso.Get());
+	rtv_cpu_handle = com_rtv_heap->GetCPUDescriptorHandleForHeapStart();
+	rtv_cpu_handle.ptr += frame_index * com_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	com_command_list->OMSetRenderTargets(1, &rtv_cpu_handle, FALSE, &dsv_cpu_handle);
+	com_command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+	com_command_list->DrawInstanced(4, 1, 0, 0);
+
 	// Draw GUI
-	///com_command_list->ClearState(nullptr);
 	com_command_list->OMSetRenderTargets(1, &rtv_cpu_handle, FALSE, nullptr);
 	com_command_list->SetDescriptorHeaps(count_of(a_heaps), a_heaps);
 	unq_gui->render();
 
+	//com_command_list->ResolveSubresource()
+	resource_barrier.Transition.pResource = a_com_render_targets[frame_index].Get();
 	resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
 	com_command_list->ResourceBarrier(1, &resource_barrier);
-	CHECK_D3D12_CALL(com_command_list->Close());
+
+	CHECK_D3D12_CALL(com_command_list->Close(),"");
 	
 	ID3D12CommandList *a_command_lists[] = { com_command_list.Get() };
 	com_command_queue->ExecuteCommandLists(count_of(a_command_lists), a_command_lists);

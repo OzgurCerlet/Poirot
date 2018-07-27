@@ -1,6 +1,7 @@
 
 cbuffer PerFrameConstants : register(b0) {
     float4x4 clip_from_view;
+    float4x4 view_from_clip;
     float4x4 view_from_world;
     float4x4 world_from_view;
     float3 cam_pos_ws;
@@ -40,10 +41,10 @@ struct PsOutput {
     float4 color    : SV_TARGET;
 };
 
-TextureCube env_map_radiance    : register(t0, space0);
-TextureCube env_map_irradiance  : register(t1, space0);
-TextureCube env_map_specular    : register(t2, space0);
-Texture2D env_brdf_lut          : register(t3, space0);
+TextureCube env_map_radiance    : register(t1, space0);
+TextureCube env_map_irradiance  : register(t2, space0);
+TextureCube env_map_specular    : register(t3, space0);
+Texture2D env_brdf_lut          : register(t4, space0);
 
 Texture2D a_material_textures[] : register(t0, space1);
 
@@ -51,7 +52,7 @@ SamplerState trilinear_clamp    : register(s0);
 SamplerState trilinear_wrap_ai16: register(s1);
 
 static const float k_min_roughness = 0.04;
-static const int k_desc_range_offset = -4;
+static const int k_desc_range_offset = -5;
 
 // See http://www.thetenthplanet.de/archives/1180
 float3x3 cotangent_frame(float3 normal_ws, float3 pos_ws, float2 uv) {
@@ -124,16 +125,6 @@ float3 specular_reflection(float reflectance0, float reflectance90, float VdotH)
     return reflectance0 + (reflectance90 - reflectance0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
 }
 
-float4 SRGBtoLINEAR(float4 srgbIn) {
-#if 1
-	float3 bLess = step(0.04045, srgbIn.xyz);
-    float3 linOut = lerp(srgbIn.xyz / 12.92, pow((srgbIn.xyz + 0.055) / 1.055, 2.4), bLess);
-	return float4(linOut,srgbIn.w);;
-#else 
-    return srgbIn;
-#endif
-}
-
 PsOutput ps_main(PsInput input) {
     
     PsOutput result = (PsOutput) 0;
@@ -174,8 +165,8 @@ PsOutput ps_main(PsInput input) {
     float lod = roughness * 10.0;
 	// retrieve a scale and bias to F0. See [1], Figure 3
     float2 brdf = env_brdf_lut.Sample(trilinear_clamp, float2(NdotV, 1.0 - roughness)).xy;
-    float3 diffuseLight = tone_map(env_map_irradiance.Sample(trilinear_clamp, normal_ws)).rgb;
-    float3 specularLight = tone_map(env_map_specular.SampleLevel(trilinear_clamp, reflected_ws, lod)).rgb;
+    float3 diffuseLight = env_map_irradiance.Sample(trilinear_clamp, normal_ws).rgb;
+    float3 specularLight = env_map_specular.SampleLevel(trilinear_clamp, reflected_ws, lod).rgb;
 
     float3 diffuse = diffuseLight * diffuse_color;
     float3 specular = specularLight * (specular_color * brdf.x + brdf.y);
@@ -188,7 +179,8 @@ PsOutput ps_main(PsInput input) {
         color += emission;
     }
 
-    // Gamma correction
-    result.color = float4(pow(color.rgb, 1.0 / 2.2), base_color.a);
+    // // Gamma correction
+    //result.color = float4(pow(color.rgb, 1.0 / 2.2), base_color.a);
+    result.color = float4(color.rgb, base_color.a);
     return result;
 }
