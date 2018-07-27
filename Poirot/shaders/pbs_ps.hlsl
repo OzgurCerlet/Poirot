@@ -41,18 +41,17 @@ struct PsOutput {
     float4 color    : SV_TARGET;
 };
 
-TextureCube env_map_radiance    : register(t1, space0);
-TextureCube env_map_irradiance  : register(t2, space0);
-TextureCube env_map_specular    : register(t3, space0);
-Texture2D env_brdf_lut          : register(t4, space0);
+TextureCube env_map_radiance    : register(t0, space1);
+TextureCube env_map_irradiance  : register(t1, space1);
+TextureCube env_map_specular    : register(t2, space1);
+Texture2D env_brdf_lut          : register(t3, space1);
 
-Texture2D a_material_textures[] : register(t0, space1);
+Texture2D a_material_textures[] : register(t0, space2);
 
 SamplerState trilinear_clamp    : register(s0);
 SamplerState trilinear_wrap_ai16: register(s1);
 
 static const float k_min_roughness = 0.04;
-static const int k_desc_range_offset = -5;
 
 // See http://www.thetenthplanet.de/archives/1180
 float3x3 cotangent_frame(float3 normal_ws, float3 pos_ws, float2 uv) {
@@ -132,13 +131,13 @@ PsOutput ps_main(PsInput input) {
     
     float4 base_color = mat_data.base_color_factor;
     if (mat_data.base_color_texture_index >= 0) {
-        base_color *= a_material_textures[mat_data.base_color_texture_index + k_desc_range_offset].Sample(trilinear_wrap_ai16, input.uv);
+        base_color *= a_material_textures[mat_data.base_color_texture_index].Sample(trilinear_wrap_ai16, input.uv);
     }
 
     float metallic = mat_data.metallic_factor;
     float roughness = mat_data.roughness_factor;
     if (mat_data.metallic_roughness_texture_index >= 0) {
-        float2 metallic_roughness = a_material_textures[mat_data.metallic_roughness_texture_index + k_desc_range_offset].Sample(trilinear_wrap_ai16, input.uv).bg; // WARNING! it is called metallicRoughnes texture but mapped to out of order channels: roughness -> g, metallic -> b!
+        float2 metallic_roughness = a_material_textures[mat_data.metallic_roughness_texture_index].Sample(trilinear_wrap_ai16, input.uv).bg; // WARNING! it is called metallicRoughnes texture but mapped to out of order channels: roughness -> g, metallic -> b!
         metallic *= metallic_roughness.x;
         roughness *= metallic_roughness.y;
     }
@@ -149,7 +148,7 @@ PsOutput ps_main(PsInput input) {
 
     float3 normal_ws = normalize(input.normal_ws);
     if (mat_data.normal_texture_index >= 0) {
-        normal_ws = compute_normal(input, normal_ws, a_material_textures[mat_data.normal_texture_index + k_desc_range_offset]);
+        normal_ws = compute_normal(input, normal_ws, a_material_textures[mat_data.normal_texture_index]);
     }
 
     float3 f0 = 0.04;
@@ -175,7 +174,7 @@ PsOutput ps_main(PsInput input) {
     color += diffuse + specular;
 
     if (mat_data.emissive_texture_index >= 0) {
-        float3 emission = a_material_textures[mat_data.emissive_texture_index + k_desc_range_offset].Sample(trilinear_wrap_ai16, input.uv).rgb;
+        float3 emission = a_material_textures[mat_data.emissive_texture_index].Sample(trilinear_wrap_ai16, input.uv).rgb;
         color += emission;
     }
 

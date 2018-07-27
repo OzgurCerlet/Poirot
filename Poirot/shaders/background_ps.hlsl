@@ -8,7 +8,7 @@ struct PsOutput {
     float4 color : SV_TARGET;
 };
 
-TextureCube env_map_radiance : register(t1, space0);
+TextureCube env_map_radiance : register(t0, space1);
 SamplerState trilinear_clamp : register(s0);
 
 PsOutput ps_main(PsInput input)
