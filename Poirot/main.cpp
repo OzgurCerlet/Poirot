@@ -65,13 +65,8 @@ ComPtr<ID3D12Device> com_device = nullptr;
 ComPtr<ID3D12CommandQueue> com_command_queue = nullptr;
 ComPtr<IDXGISwapChain3> com_swap_chain = nullptr;
 
-ComPtr<ID3D12DescriptorHeap> com_rtv_heap = nullptr;
 ComPtr<ID3D12DescriptorHeap> com_dsv_heap = nullptr;
-//ComPtr<ID3D12DescriptorHeap> com_cbv_srv_uav_heap = nullptr;
-
-array<ComPtr<ID3D12Resource>, max_inflight_frame_count + 1> a_com_render_targets = {};
 ComPtr<ID3D12Resource> com_dsv = nullptr;
-uint16_t rtv_descriptor_size = 0;
 
 array<ComPtr<ID3D12CommandAllocator>, max_inflight_frame_count> a_com_command_allocators = {};
 ComPtr<ID3D12GraphicsCommandList> com_command_list = nullptr;
@@ -160,10 +155,18 @@ struct RenderBuffer {
 	ComPtr<ID3D12Resource> com_resource;
 	uint32_t srv_descriptor_table_index;
 	uint32_t rtv_descriptor_table_index;
+	uint16_t width;
+	uint16_t height;
+	DXGI_FORMAT format;
+	bool is_shader_visible;
+	bool is_multi_sampled;
+	
+	RenderBuffer(uint16_t _width=0, uint16_t _height=0, DXGI_FORMAT _format = DXGI_FORMAT_UNKNOWN, bool _is_shader_visible = false, bool _is_multi_sampled = false)
+		: width(_width), height(_height), format(_format), is_shader_visible(_is_shader_visible), is_multi_sampled(_is_multi_sampled) {};
 };
 
-array<RenderBuffer, max_inflight_frame_count> a_back_buffers;
-RenderBuffer hdr_buffer;
+array<RenderBuffer, max_inflight_frame_count> a_back_buffers = {};
+RenderBuffer hdr_buffer = { back_buffer_width , back_buffer_height, DXGI_FORMAT_R16G16B16A16_FLOAT, true };
 
 struct Material {
 	enum AlphaMode { ALPHAMODE_OPAQUE, ALPHAMODE_MASK, ALPHAMODE_BLEND };
@@ -257,7 +260,7 @@ struct DescriptorHeap{
 	uint32_t num_max_descriptors;
 	uint32_t num_used_descriptors;
 	uint32_t descriptor_increment_size;
-	D3D12_GPU_DESCRIPTOR_HANDLE base_descriptor;
+	D3D12_GPU_DESCRIPTOR_HANDLE base_gpu_descriptor;
 	D3D12_DESCRIPTOR_HEAP_TYPE type;
 	bool is_shader_visible;
 
@@ -268,12 +271,12 @@ struct DescriptorHeap{
 	void init() {
 		D3D12_DESCRIPTOR_HEAP_DESC desc = {};
 		desc.NumDescriptors = num_max_descriptors;
-		desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		desc.Type = type;
 		desc.Flags = is_shader_visible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 		CHECK_D3D12_CALL(com_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&com_heap)),"");
 
 		descriptor_increment_size = com_device->GetDescriptorHandleIncrementSize(type);
-		base_descriptor = com_heap->GetGPUDescriptorHandleForHeapStart();
+		base_gpu_descriptor = com_heap->GetGPUDescriptorHandleForHeapStart();
 	}
 
 	D3D12_CPU_DESCRIPTOR_HANDLE get_cpu_handle(uint32_t descriptor_index) {
@@ -285,13 +288,14 @@ struct DescriptorHeap{
 
 	D3D12_GPU_DESCRIPTOR_HANDLE get_gpu_handle(uint32_t descriptor_index) {
 		if(descriptor_index > num_used_descriptors || descriptor_index == num_max_descriptors) { throw exception("Not enough descriptors left in this heap"); }
-		D3D12_GPU_DESCRIPTOR_HANDLE gpu_descriptor_handle = base_descriptor;
+		D3D12_GPU_DESCRIPTOR_HANDLE gpu_descriptor_handle = base_gpu_descriptor;
 		gpu_descriptor_handle.ptr += descriptor_increment_size * descriptor_index;
 		return gpu_descriptor_handle;
 	};
 };
 
-DescriptorHeap cbv_srv_uav_desc_heap = {64u, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV , true};
+DescriptorHeap cbv_srv_uav_desc_heap = { 64u, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV , true};
+DescriptorHeap rtv_desc_heap = { 64u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV , false };
 
 vector<Texture*> env_maps = {};
 Texture mesh_albedo = {};
@@ -312,7 +316,7 @@ inline void check_win32_call(HANDLE h) {
 	if(h == NULL) { throw std::exception(); };
 }
 
-inline void set_name(ComPtr<ID3D12Resource> &com_resource, string name) {
+inline void set_name(ComPtr<ID3D12Resource> &com_resource, const string &name) {
 	wstring name_w(name.begin(), name.end());
 	com_resource->SetName(name_w.c_str());
 }
@@ -576,7 +580,6 @@ void load_texture(string asset_filename, Texture &tex) {
 	free(p_src_data);
 }
 
-// TODO(cerlet): use is_srgb info!
 void load_texture(tinygltf::Image &image, bool is_srgb, Texture &tex) {
 	size_t image_size = 0;
 	uint8_t *p_image_data = nullptr;
@@ -1145,7 +1148,7 @@ void create_pipeline_state_objects() {
 		pso_desc.SampleMask = UINT_MAX;
 		pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		pso_desc.NumRenderTargets = 1;
-		pso_desc.RTVFormats[0] = a_com_render_targets[max_inflight_frame_count]->GetDesc().Format;
+		pso_desc.RTVFormats[0] = hdr_buffer.format;
 		pso_desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 		pso_desc.SampleDesc.Count = ms_count;
 		pso_desc.SampleDesc.Quality = ms_quality;
@@ -1164,7 +1167,7 @@ void create_pipeline_state_objects() {
 		pso_desc.SampleMask = UINT_MAX;
 		pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		pso_desc.NumRenderTargets = 1;
-		pso_desc.RTVFormats[0] = a_com_render_targets[max_inflight_frame_count]->GetDesc().Format;
+		pso_desc.RTVFormats[0] = hdr_buffer.format;
 		pso_desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 		pso_desc.SampleDesc.Count = ms_count;
 		pso_desc.SampleDesc.Quality = ms_quality;
@@ -1183,7 +1186,7 @@ void create_pipeline_state_objects() {
 		pso_desc.SampleMask = UINT_MAX;
 		pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		pso_desc.NumRenderTargets = 1;
-		pso_desc.RTVFormats[0] = a_com_render_targets[max_inflight_frame_count]->GetDesc().Format;
+		pso_desc.RTVFormats[0] = hdr_buffer.format;
 		pso_desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 		pso_desc.SampleDesc.Count = ms_count;
 		pso_desc.SampleDesc.Quality = ms_quality;
@@ -1202,13 +1205,57 @@ void create_pipeline_state_objects() {
 		pso_desc.SampleMask = UINT_MAX;
 		pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		pso_desc.NumRenderTargets = 1;
-		pso_desc.RTVFormats[0] = a_com_render_targets[0]->GetDesc().Format;
+		pso_desc.RTVFormats[0] = a_back_buffers[0].format;
 		pso_desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 		pso_desc.SampleDesc.Count = 1;
 		pso_desc.SampleDesc.Quality = 0;
 		CHECK_D3D12_CALL(com_device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&com_final_pso)), "");
 	}
 
+}
+
+void create_render_buffer(RenderBuffer& render_buffer, DescriptorHeap *p_rtv_desc_heap, DescriptorHeap *p_srv_desc_heap, const string &debug_name) {
+	if(!render_buffer.com_resource) {
+		D3D12_HEAP_PROPERTIES heap_properties = {};
+		heap_properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+		D3D12_CLEAR_VALUE clear_value = {};
+		clear_value.Format = render_buffer.format;
+
+		D3D12_RESOURCE_DESC resource_desc = {};
+		resource_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+		resource_desc.Width = render_buffer.width;
+		resource_desc.Height = render_buffer.height;
+		resource_desc.DepthOrArraySize = 1;
+		resource_desc.MipLevels = 1;
+		resource_desc.Format = render_buffer.format;
+		resource_desc.SampleDesc.Count = ms_count;
+		resource_desc.SampleDesc.Quality = ms_quality;
+		resource_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+		resource_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+		CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_RENDER_TARGET, &clear_value, IID_PPV_ARGS(&(render_buffer.com_resource))), "");
+		set_name(render_buffer.com_resource, debug_name);
+	}
+
+	D3D12_RENDER_TARGET_VIEW_DESC desc = {};
+	desc.Format = render_buffer.format;
+	desc.ViewDimension = is_msaa_enabled ? D3D12_RTV_DIMENSION_TEXTURE2DMS : D3D12_RTV_DIMENSION_TEXTURE2D;
+	com_device->CreateRenderTargetView(render_buffer.com_resource.Get(), &desc, p_rtv_desc_heap->get_cpu_handle(p_rtv_desc_heap->num_used_descriptors));
+	render_buffer.rtv_descriptor_table_index = p_rtv_desc_heap->num_used_descriptors++;
+
+	if(render_buffer.is_shader_visible) {
+		D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+		srv_desc.Format = render_buffer.format;
+		srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srv_desc.ViewDimension = render_buffer.is_multi_sampled ? D3D12_SRV_DIMENSION_TEXTURE2DMS : D3D12_SRV_DIMENSION_TEXTURE2D;
+		srv_desc.Texture2D.MostDetailedMip = 0;
+		srv_desc.Texture2D.MipLevels = -1;
+		srv_desc.Texture2D.PlaneSlice = 0;
+		srv_desc.Texture2D.ResourceMinLODClamp = 0;
+		D3D12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handle = p_srv_desc_heap->get_cpu_handle(p_srv_desc_heap->num_used_descriptors);
+		com_device->CreateShaderResourceView(render_buffer.com_resource.Get(), &srv_desc, cpu_descriptor_handle);
+		render_buffer.srv_descriptor_table_index = p_srv_desc_heap->num_used_descriptors++;
+	}
 }
 
 void init(HINSTANCE h_instance) {
@@ -1287,58 +1334,24 @@ void init(HINSTANCE h_instance) {
 		}
 
 		{
-			//local_desc_heap.init();
+			rtv_desc_heap.init();
 			cbv_srv_uav_desc_heap.init();
 		}
 
-		{
-			rtv_descriptor_size = com_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
-			D3D12_DESCRIPTOR_HEAP_DESC rtv_heap_desc = {};
-			rtv_heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-			rtv_heap_desc.NumDescriptors = max_inflight_frame_count+1;
-			CHECK_D3D12_CALL(com_device->CreateDescriptorHeap(&rtv_heap_desc, IID_PPV_ARGS(&com_rtv_heap)), "");
-
-			D3D12_CPU_DESCRIPTOR_HANDLE rtv_cpu_handle = { com_rtv_heap->GetCPUDescriptorHandleForHeapStart() };
+		{			
 			for(int buffer_index = 0; buffer_index < max_inflight_frame_count; ++buffer_index) {
-				CHECK_DXGI_CALL(com_swap_chain->GetBuffer(buffer_index, IID_PPV_ARGS(&(a_com_render_targets[buffer_index]))));
-				com_device->CreateRenderTargetView(a_com_render_targets[buffer_index].Get(), nullptr, rtv_cpu_handle);
-				rtv_cpu_handle.ptr += rtv_descriptor_size;
+				CHECK_DXGI_CALL(com_swap_chain->GetBuffer(buffer_index, IID_PPV_ARGS(&(a_back_buffers[buffer_index].com_resource))));
+				D3D12_RESOURCE_DESC desc = a_back_buffers[buffer_index].com_resource->GetDesc();
+				a_back_buffers[buffer_index].format = desc.Format;
+				a_back_buffers[buffer_index].width = desc.Width;
+				a_back_buffers[buffer_index].height = desc.Height;
+				a_back_buffers[buffer_index].is_multi_sampled = (desc.SampleDesc.Count > 1);
 			}
 
-			D3D12_HEAP_PROPERTIES heap_properties = {};
-			heap_properties.Type = D3D12_HEAP_TYPE_DEFAULT;
-			D3D12_CLEAR_VALUE clear_value = {};
-			clear_value.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-
-			D3D12_RESOURCE_DESC resource_desc = {};
-			resource_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-			resource_desc.Width = back_buffer_width;
-			resource_desc.Height = back_buffer_height;
-			resource_desc.DepthOrArraySize = 1;
-			resource_desc.MipLevels = 1;
-			resource_desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-			resource_desc.SampleDesc.Count = ms_count;
-			resource_desc.SampleDesc.Quality = ms_quality;
-			resource_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-			resource_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-			CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &clear_value, IID_PPV_ARGS(&(a_com_render_targets[max_inflight_frame_count]))), "");
-
-			D3D12_RENDER_TARGET_VIEW_DESC desc = {};
-			desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-			desc.ViewDimension = is_msaa_enabled ? D3D12_RTV_DIMENSION_TEXTURE2DMS : D3D12_RTV_DIMENSION_TEXTURE2D;
-			com_device->CreateRenderTargetView(a_com_render_targets[max_inflight_frame_count].Get(), &desc, rtv_cpu_handle);
-	
-			D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-			srv_desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-			srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-			srv_desc.ViewDimension = is_msaa_enabled ? D3D12_SRV_DIMENSION_TEXTURE2DMS : D3D12_SRV_DIMENSION_TEXTURE2D;
-			srv_desc.Texture2D.MostDetailedMip = 0;
-			srv_desc.Texture2D.MipLevels = -1;
-			srv_desc.Texture2D.PlaneSlice = 0;
-			srv_desc.Texture2D.ResourceMinLODClamp = 0;
-			D3D12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handle = cbv_srv_uav_desc_heap.get_cpu_handle(cbv_srv_uav_desc_heap.num_used_descriptors++);
-			com_device->CreateShaderResourceView(a_com_render_targets[max_inflight_frame_count].Get(), &srv_desc, cpu_descriptor_handle);
+			create_render_buffer(a_back_buffers[0], &rtv_desc_heap, &cbv_srv_uav_desc_heap, "back_buffer_0");
+			create_render_buffer(a_back_buffers[1], &rtv_desc_heap, &cbv_srv_uav_desc_heap, "back_buffer_1");
+			create_render_buffer(a_back_buffers[2], &rtv_desc_heap, &cbv_srv_uav_desc_heap, "back_buffer_2");
+			create_render_buffer(hdr_buffer, &rtv_desc_heap, &cbv_srv_uav_desc_heap, "hdr_buffer");
 		}
 
 		{
@@ -1722,12 +1735,12 @@ void render_frame() {
 	com_command_list->RSSetScissorRects(1, &rect);
 	
 	D3D12_RESOURCE_BARRIER resource_barrier = {};
-	resource_barrier.Transition.pResource = a_com_render_targets[frame_index].Get();
+	resource_barrier.Transition.pResource = a_back_buffers[frame_index].com_resource.Get();
 	resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
 	resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	com_command_list->ResourceBarrier(1, &resource_barrier);
 
-	resource_barrier.Transition.pResource = a_com_render_targets[max_inflight_frame_count].Get();
+	resource_barrier.Transition.pResource = hdr_buffer.com_resource.Get();
 	resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 	resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	com_command_list->ResourceBarrier(1, &resource_barrier);
@@ -1738,11 +1751,9 @@ void render_frame() {
 	com_command_list->SetGraphicsRootConstantBufferView(1, per_frame_cb.gpu_virtual_address + sizeof(per_frame_cb.constants) * frame_index);
 	com_command_list->SetGraphicsRootConstantBufferView(2, transformations_cb.gpu_virtual_address + sizeof(transformations_cb.constants) * frame_index);
 	com_command_list->SetGraphicsRootConstantBufferView(3, material_data_cb.gpu_virtual_address + sizeof(material_data_cb.constants) * frame_index);
-	com_command_list->SetGraphicsRootDescriptorTable(4, cbv_srv_uav_desc_heap.base_descriptor);
+	com_command_list->SetGraphicsRootDescriptorTable(4, cbv_srv_uav_desc_heap.base_gpu_descriptor);
 
-	// Clear the background to a random color
-	D3D12_CPU_DESCRIPTOR_HANDLE rtv_cpu_handle(com_rtv_heap->GetCPUDescriptorHandleForHeapStart());
-	rtv_cpu_handle.ptr += max_inflight_frame_count * com_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	D3D12_CPU_DESCRIPTOR_HANDLE rtv_cpu_handle(rtv_desc_heap.get_cpu_handle(hdr_buffer.rtv_descriptor_table_index));
 	D3D12_CPU_DESCRIPTOR_HANDLE dsv_cpu_handle(com_dsv_heap->GetCPUDescriptorHandleForHeapStart());
 	com_command_list->OMSetRenderTargets(1, &rtv_cpu_handle, FALSE, &dsv_cpu_handle);
 	com_command_list->ClearRenderTargetView(rtv_cpu_handle, clear_color, 0, nullptr);
@@ -1766,14 +1777,13 @@ void render_frame() {
 	}
 
 	// Copy
-	resource_barrier.Transition.pResource = a_com_render_targets[max_inflight_frame_count].Get();
+	resource_barrier.Transition.pResource = hdr_buffer.com_resource.Get();
 	resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 	com_command_list->ResourceBarrier(1, &resource_barrier);
 
 	com_command_list->SetPipelineState(com_final_pso.Get());
-	rtv_cpu_handle = com_rtv_heap->GetCPUDescriptorHandleForHeapStart();
-	rtv_cpu_handle.ptr += frame_index * com_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	rtv_cpu_handle = rtv_desc_heap.get_cpu_handle(a_back_buffers[frame_index].rtv_descriptor_table_index);
 	com_command_list->OMSetRenderTargets(1, &rtv_cpu_handle, FALSE, &dsv_cpu_handle);
 	com_command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 	com_command_list->DrawInstanced(4, 1, 0, 0);
@@ -1784,7 +1794,7 @@ void render_frame() {
 	unq_gui->render();
 
 	//com_command_list->ResolveSubresource()
-	resource_barrier.Transition.pResource = a_com_render_targets[frame_index].Get();
+	resource_barrier.Transition.pResource = a_back_buffers[frame_index].com_resource.Get();
 	resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
 	com_command_list->ResourceBarrier(1, &resource_barrier);
