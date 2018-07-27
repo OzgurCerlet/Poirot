@@ -129,6 +129,7 @@
     <ClInclude Include="external\dear_imgui\imgui.h" />
     <ClInclude Include="external\dear_imgui\imgui_impl_dx12.h" />
     <ClInclude Include="external\dear_imgui\imgui_internal.h" />
+    <ClInclude Include="external\stb\stb_image_resize.h" />
     <ClInclude Include="external\tiny_gltf\json.hpp" />
     <ClInclude Include="external\tiny_gltf\stb_image.h" />
     <ClInclude Include="external\tiny_gltf\stb_image_write.h" />

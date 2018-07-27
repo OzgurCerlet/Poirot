@@ -25,6 +25,9 @@
     <Filter Include="Source Files\external\tinygltf">
       <UniqueIdentifier>{d7870d32-9f27-4204-8537-4b25a540438c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\external\stb">
+      <UniqueIdentifier>{02522db1-a6be-475b-85c5-356b773fb6a6}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -79,6 +82,9 @@
     </ClInclude>
     <ClInclude Include="external\tiny_gltf\tiny_gltf.h">
       <Filter>Source Files\external\tinygltf</Filter>
+    </ClInclude>
+    <ClInclude Include="external\stb\stb_image_resize.h">
+      <Filter>Source Files\external\stb</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

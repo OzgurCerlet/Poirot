@@ -47,8 +47,8 @@ Texture2D env_brdf_lut          : register(t3, space0);
 
 Texture2D a_material_textures[] : register(t0, space1);
 
-SamplerState bilinear_clamp : register(s0);
-SamplerState trilinear_wrap : register(s1);
+SamplerState trilinear_clamp    : register(s0);
+SamplerState trilinear_wrap_ai16: register(s1);
 
 static const float k_min_roughness = 0.04;
 static const int k_desc_range_offset = -4;
@@ -92,7 +92,7 @@ float3 compute_normal(PsInput input, float3 normal_ws, Texture2D normal_texture)
     float3x3 world_from_tangent = transpose(float3x3(b, t, normal_ws));
 #endif
     
-    float3 normal_ts = normal_texture.Sample(trilinear_wrap, input.uv).rgb * 2.0 - 1.0;
+    float3 normal_ts = normal_texture.Sample(trilinear_wrap_ai16, input.uv).rgb * 2.0 - 1.0;
     normal_ws = normalize(mul(world_from_tangent, normal_ts));
     
     return normal_ws;
@@ -112,7 +112,7 @@ float3 tone_map_uncharted_2(float3 x) {
 float4 tone_map(float4 color) {
     float3 out_color = tone_map_uncharted_2(color.rgb * 4.5);
     out_color = out_color * (1.0f / tone_map_uncharted_2(11.2f));
-    return float4(pow(out_color, 1.0f / 2.2), color.a);
+    return float4(out_color.rgb, color.a);
 }
 
 // From
@@ -141,13 +141,13 @@ PsOutput ps_main(PsInput input) {
     
     float4 base_color = mat_data.base_color_factor;
     if (mat_data.base_color_texture_index >= 0) {
-        base_color *= a_material_textures[mat_data.base_color_texture_index + k_desc_range_offset].Sample(trilinear_wrap, input.uv);
+        base_color *= a_material_textures[mat_data.base_color_texture_index + k_desc_range_offset].Sample(trilinear_wrap_ai16, input.uv);
     }
 
     float metallic = mat_data.metallic_factor;
     float roughness = mat_data.roughness_factor;
     if (mat_data.metallic_roughness_texture_index >= 0) {
-        float2 metallic_roughness = a_material_textures[mat_data.metallic_roughness_texture_index + k_desc_range_offset].Sample(trilinear_wrap, input.uv).bg;// WARNING! it is called metallicRoughnes texture but mapped to out of order channels: roughness -> g, metallic -> b!
+        float2 metallic_roughness = a_material_textures[mat_data.metallic_roughness_texture_index + k_desc_range_offset].Sample(trilinear_wrap_ai16, input.uv).bg; // WARNING! it is called metallicRoughnes texture but mapped to out of order channels: roughness -> g, metallic -> b!
         metallic *= metallic_roughness.x;
         roughness *= metallic_roughness.y;
     }
@@ -169,18 +169,13 @@ PsOutput ps_main(PsInput input) {
     float3 view_ws = normalize(cam_pos_ws - input.pos_ws);
     float3 reflected_ws = -normalize(reflect(view_ws, normal_ws));
 
-    //view_ws = float3(view_ws.x, view_ws.z, -view_ws.y);
-    //reflected_ws = float3(reflected_ws.x, reflected_ws.z, -reflected_ws.y);
-    //normal_ws = float3(normal_ws.x, normal_ws.z, -normal_ws.y);
-
     float NdotV = clamp(abs(dot(normal_ws, view_ws)), 0.001, 1.0);
     
     float lod = roughness * 10.0;
 	// retrieve a scale and bias to F0. See [1], Figure 3
-    float2 brdf = env_brdf_lut.Sample(bilinear_clamp, float2(NdotV, 1.0 - roughness)).xy;
-    //float2 brdf = env_brdf_lut.Sample(trilinear_wrap, float2(NdotV, 1.0 - roughness)).xy;
-    float3 diffuseLight = SRGBtoLINEAR(tone_map(env_map_irradiance.Sample(trilinear_wrap, normal_ws))).rgb;
-    float3 specularLight = SRGBtoLINEAR(tone_map(env_map_specular.SampleLevel(trilinear_wrap, reflected_ws, lod))).rgb;
+    float2 brdf = env_brdf_lut.Sample(trilinear_clamp, float2(NdotV, 1.0 - roughness)).xy;
+    float3 diffuseLight = tone_map(env_map_irradiance.Sample(trilinear_clamp, normal_ws)).rgb;
+    float3 specularLight = tone_map(env_map_specular.SampleLevel(trilinear_clamp, reflected_ws, lod)).rgb;
 
     float3 diffuse = diffuseLight * diffuse_color;
     float3 specular = specularLight * (specular_color * brdf.x + brdf.y);
@@ -189,12 +184,9 @@ PsOutput ps_main(PsInput input) {
     color += diffuse + specular;
 
     if (mat_data.emissive_texture_index >= 0) {
-        float3 emission = SRGBtoLINEAR(a_material_textures[mat_data.emissive_texture_index + k_desc_range_offset].Sample(trilinear_wrap, input.uv)).rgb;
+        float3 emission = a_material_textures[mat_data.emissive_texture_index + k_desc_range_offset].Sample(trilinear_wrap_ai16, input.uv).rgb;
         color += emission;
     }
-
-    //color = float3(brdf, 0);
-    //(specular_color * brdf.x + brdf.y);;
 
     // Gamma correction
     result.color = float4(pow(color.rgb, 1.0 / 2.2), base_color.a);

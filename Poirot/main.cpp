@@ -3,7 +3,9 @@
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include "external/tiny_gltf/tiny_gltf.h"
+#include "external/stb/stb_image_resize.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -581,6 +583,64 @@ void load_texture(tinygltf::Image &image, bool is_srgb, Texture &tex) {
 			image_size = image.image.size();
 		}
 	}
+
+	// Mipmap generation!
+	int mip_levels = 1;
+	size_t image_with_mips_size = image_size;
+	uint8_t *p_image_with_mips_data = nullptr;
+	{
+		auto is_power_of_2 = [](int value, int &power){
+			if((value && !(value & (value - 1)))) {
+				static const unsigned int b[] = { 0xAAAAAAAA, 0xCCCCCCCC, 0xF0F0F0F0,0xFF00FF00, 0xFFFF0000 };
+				register unsigned int r = (value & b[0]) != 0;
+				r |= ((value & b[4]) != 0) << 4;
+				r |= ((value & b[3]) != 0) << 3;
+				r |= ((value & b[2]) != 0) << 2;
+				r |= ((value & b[1]) != 0) << 1;
+				power = r;
+				return true;
+			}
+			else {
+				return false;
+			}
+		};
+
+		// For now only deal with square images with power of 2 width!
+		int power = 0;
+		if((image.width == image.height) && is_power_of_2(image.width, power)) {
+			int size = image.width;
+			mip_levels = power + 1;
+			const int pixel_size = 4;
+			unsigned char *p_input = p_image_data;
+			unsigned char *p_output = reinterpret_cast<unsigned char *>(malloc(size*(size>>1)*3* pixel_size));
+			memcpy(p_output, p_input, image_size);
+			p_image_with_mips_data = p_output;
+			p_output += image_size;
+			
+			int success = 1;
+			while((size > 1) && success) {
+				if(is_srgb) {
+					success = stbir_resize_uint8_srgb(p_input, size, size, size*pixel_size, p_output, size >> 1, size >> 1, (size >> 1)* pixel_size, 4, STBIR_ALPHA_CHANNEL_NONE, 0);
+				}
+				else {
+					success = stbir_resize_uint8(p_input, size, size, size*pixel_size, p_output, size >> 1, size >> 1, (size >> 1)* pixel_size, 4);
+				}
+				size = size >> 1;
+				
+				size_t mip_size = size * size * pixel_size;
+				p_input = p_output;
+				p_output += mip_size;
+				image_with_mips_size += mip_size;
+			}
+
+			if(!success) {
+				mip_levels = 1;
+				free(p_image_with_mips_data);
+				p_image_with_mips_data = p_image_data;
+				image_with_mips_size = image_size;
+			}
+		}
+	}
 	
 	OctarineImageHeader header = {};
 	header.width = image.width;
@@ -588,12 +648,13 @@ void load_texture(tinygltf::Image &image, bool is_srgb, Texture &tex) {
 	header.depth = 1;
 	header.array_size = 1;
 	header.format = octarine_image_make_format_from_dxgi_format(is_srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM);
-	header.mip_levels = 1; // TODO(cerlet): IMplment mipmap generation!
-	header.size_of_data = image_size;
+	header.mip_levels = mip_levels;
+	header.size_of_data = image_with_mips_size;
 	header.flags = 0;
 
-	load_texture(header, image.name, p_image_data, tex);
-
+	load_texture(header, image.name, p_image_with_mips_data, tex);
+	
+	delete(p_image_with_mips_data);
 	if(image.component == 3) delete(p_image_data);
 }
 
@@ -602,8 +663,13 @@ void load_textures(tinygltf::Model &gltf_model, Scene& scene) {
 	vector<int> srgb_image_indices;
 
 	for(tinygltf::Material &material : gltf_model.materials) {
-		if(material.values.find("baseColorTexture") != material.values.end()) {
-			srgb_image_indices.push_back(gltf_model.textures[material.values["baseColorTexture"].TextureIndex()].source);
+		auto it = material.values.find("baseColorTexture");
+		if(it != material.values.end()) {
+			srgb_image_indices.push_back(gltf_model.textures[it->second.TextureIndex()].source);
+		}
+		it = material.additionalValues.find("emissiveTexture");
+		if(it != material.additionalValues.end()) {
+			srgb_image_indices.push_back(gltf_model.textures[it->second.TextureIndex()].source);
 		}
 	}
 
@@ -942,8 +1008,7 @@ void create_root_signature() {
 	a_root_params[4].DescriptorTable.pDescriptorRanges = a_srv_descriptor_ranges;
 
 	D3D12_STATIC_SAMPLER_DESC static_sampler_0 = {};
-	//static_sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-	static_sampler_0.Filter = D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+	static_sampler_0.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 	static_sampler_0.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
 	static_sampler_0.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
 	static_sampler_0.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
@@ -958,13 +1023,12 @@ void create_root_signature() {
 	static_sampler_0.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 	D3D12_STATIC_SAMPLER_DESC static_sampler_1 = {};
-	//static_sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-	static_sampler_1.Filter = D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+	static_sampler_1.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 	static_sampler_1.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
 	static_sampler_1.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
 	static_sampler_1.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
 	static_sampler_1.MipLODBias = 0;
-	static_sampler_1.MaxAnisotropy = 1;
+	static_sampler_1.MaxAnisotropy = 16;
 	static_sampler_1.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
 	static_sampler_1.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK;
 	static_sampler_1.MinLOD = 0;
