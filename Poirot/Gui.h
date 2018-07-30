@@ -20,6 +20,10 @@ struct GuiData {
 	bool is_a_pressed;
 	bool is_e_pressed;
 	bool is_q_pressed;
+
+	// background
+	int background_env_map_type;
+	int background_specular_irradiance_mip_level;
 };
 
 class Gui

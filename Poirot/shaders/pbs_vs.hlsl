@@ -8,7 +8,7 @@ cbuffer PerFrameConstants : register(b0) {
 }
 
 cbuffer Transformations : register(b1) {
-    float4x4 a_world_from_object[32];
+    float4x4 a_world_from_object[128];
 }
 
 cbuffer PerDrawConstants : register(b2) {

@@ -41,7 +41,6 @@ struct PsOutput {
     float4 color    : SV_TARGET;
 };
 
-TextureCube env_map_radiance    : register(t0, space1);
 TextureCube env_map_irradiance  : register(t1, space1);
 TextureCube env_map_specular    : register(t2, space1);
 Texture2D env_brdf_lut          : register(t3, space1);
@@ -98,24 +97,7 @@ float3 compute_normal(PsInput input, float3 normal_ws, Texture2D normal_texture)
     return normal_ws;
 }
 
-// From http://filmicgames.com/archives/75
-float3 tone_map_uncharted_2(float3 x) {
-    float A = 0.15;
-    float B = 0.50;
-    float C = 0.10;
-    float D = 0.20;
-    float E = 0.02;
-    float F = 0.30;
-    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
-}
 
-float4 tone_map(float4 color) {
-    float3 out_color = tone_map_uncharted_2(color.rgb * 4.5);
-    out_color = out_color * (1.0f / tone_map_uncharted_2(11.2f));
-    return float4(out_color.rgb, color.a);
-}
-
-// From
 float3 f_schlick_roughness(float cos_theta, float3 F0, float roughness) {
     return F0 + ( max((float3)(1.0 - roughness), F0) - F0 ) * pow(1.0 - cos_theta, 5.0);
 }
@@ -158,11 +140,9 @@ PsOutput ps_main(PsInput input) {
 
     float3 view_ws = normalize(cam_pos_ws - input.pos_ws);
     float3 reflected_ws = -normalize(reflect(view_ws, normal_ws));
-
     float NdotV = clamp(abs(dot(normal_ws, view_ws)), 0.001, 1.0);
     
     float lod = roughness * 10.0;
-	// retrieve a scale and bias to F0. See [1], Figure 3
     float2 brdf = env_brdf_lut.Sample(trilinear_clamp, float2(NdotV, 1.0 - roughness)).xy;
     float3 diffuseLight = env_map_irradiance.Sample(trilinear_clamp, normal_ws).rgb;
     float3 specularLight = env_map_specular.SampleLevel(trilinear_clamp, reflected_ws, lod).rgb;
@@ -170,16 +150,13 @@ PsOutput ps_main(PsInput input) {
     float3 diffuse = diffuseLight * diffuse_color;
     float3 specular = specularLight * (specular_color * brdf.x + brdf.y);
 
-    float3 color = 0;
-    color += diffuse + specular;
+    float3 color = diffuse + specular;
 
     if (mat_data.emissive_texture_index >= 0) {
         float3 emission = a_material_textures[mat_data.emissive_texture_index].Sample(trilinear_wrap_ai16, input.uv).rgb;
         color += emission;
     }
 
-    // // Gamma correction
-    //result.color = float4(pow(color.rgb, 1.0 / 2.2), base_color.a);
     result.color = float4(color.rgb, base_color.a);
     return result;
 }

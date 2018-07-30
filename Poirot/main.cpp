@@ -56,6 +56,7 @@ constexpr DXGI_FORMAT back_buffer_format = DXGI_FORMAT_R8G8B8A8_UNORM;
 constexpr uint8_t ms_count = 8;
 constexpr uint8_t ms_quality = 0;
 bool is_msaa_enabled = true;
+bool is_mipchain_generation_enabled = false;
 
 unique_ptr<Window> unq_window = nullptr;
 unique_ptr<Gui> unq_gui = nullptr;
@@ -94,7 +95,7 @@ struct PerFrameConstantBuffer {
 	uint64_t gpu_virtual_address;
 };
 
-constexpr uint16_t k_max_object_count = 32;
+constexpr uint16_t k_max_object_count = 128;
 constexpr uint16_t k_max_material_count = 32;
 
 struct ObjectTransformationsConstantBuffer {
@@ -183,7 +184,13 @@ struct Material {
 	Texture *emissive_texture;
 };
 
+struct BoundingBox {
+	XMFLOAT3 min;
+	XMFLOAT3 max;
+};
+
 struct Primitive {
+	BoundingBox bbox;
 	uint32_t first_index;
 	uint32_t index_count;
 	uint32_t material_index;
@@ -201,24 +208,66 @@ struct Node {
 	XMVECTOR xm_translation = {};
 	XMVECTOR xm_scale = { 1.0f, 1.0f, 1.0f, 1.0f };
 	
+	BoundingBox bbox;
+
 	uint32_t index;
 	uint32_t transformation_index;
 
-	void update(ObjectTransformationsConstantBuffer &transformations_cb);
+	inline XMMATRIX get_local_transform();
+	inline XMMATRIX get_final_transform();
+	inline void compute_bounding_box();
+	void update(ObjectTransformationsConstantBuffer &transformations_cb, const XMMATRIX& xm_global_transform);
 };
 
-void Node::update(ObjectTransformationsConstantBuffer &transformations_cb) {
+inline void Node::compute_bounding_box() {
+	if(primitives.size()>0) {
+		XMMATRIX xm_transform = get_final_transform();
+		for(auto& primitive : primitives) {
+			
+			XMVECTOR xm_min = { primitive.bbox.min.x, primitive.bbox.min.y, primitive.bbox.min.z, 1.f };
+			xm_min = XMVector4Transform(xm_min, xm_transform);
+			XMFLOAT3 min;
+			XMStoreFloat3(&min, xm_min);
+
+			XMVECTOR xm_max = { primitive.bbox.max.x, primitive.bbox.max.y, primitive.bbox.max.z, 1.f };
+			xm_max = XMVector4Transform(xm_max, xm_transform);
+			XMFLOAT3 max;
+			XMStoreFloat3(&max, xm_max);
+
+			if(min.x < bbox.min.x) { bbox.min.x = min.x; }
+			if(min.y < bbox.min.y) { bbox.min.y = min.y; }
+			if(min.z < bbox.min.z) { bbox.min.z = min.z; }
+			if(max.x > bbox.max.x) { bbox.max.x = max.x; }
+			if(max.y > bbox.max.y) { bbox.max.y = max.y; }
+			if(max.z > bbox.max.z) { bbox.max.z = max.z; }
+		}
+	}
+}
+
+inline XMMATRIX Node::get_local_transform() {
+	return XMMatrixTranspose(XMMatrixTranslationFromVector(xm_translation)) * XMMatrixTranspose(XMMatrixRotationQuaternion(xm_rotation)) * XMMatrixScalingFromVector(xm_scale) * xm_transform;
+}
+
+inline XMMATRIX Node::get_final_transform() {
+	XMMATRIX transform = get_local_transform();
+	Node *p = p_parent;
+	while(p) {
+		transform = p->get_local_transform() * transform;
+		p = p->p_parent;
+	}
+	return transform;
+}
+
+void Node::update(ObjectTransformationsConstantBuffer &transformations_cb, const XMMATRIX& xm_global_transform) {
 	if(p_mesh) {
 		static uint32_t index = 0;
 		transformation_index = index;
-		XMVECTOR origin = {0,0,0,0};
-		XMVECTOR new_scale = {0.00157,0.00157,0.00157};
-		XMMATRIX local_transformation = XMMatrixAffineTransformation(new_scale, origin, xm_rotation, xm_translation);
-		XMMATRIX final_transformation = XMMatrixMultiply(local_transformation, xm_transform);
+		XMMATRIX final_transformation = xm_global_transform * get_final_transform();
 		XMStoreFloat4x4(transformations_cb.constants.a_world_from_objects + index++, final_transformation);
-		for(auto& child : children) {
-			child->update(transformations_cb);
-		}
+	}
+
+	for(auto& child : children) {
+		child->update(transformations_cb, xm_global_transform);
 	}
 }
 
@@ -229,12 +278,37 @@ struct Vertex {
 };
 
 struct Scene {
+	XMMATRIX global_transform;
 	vector<Texture*> textures;
 	vector<Material*> materials;
 	vector<Mesh*> meshes;
 	vector<Node*> nodes;
 	vector<Node*> linear_nodes;
+	BoundingBox bbox;
+
+	Scene() {
+		bbox.min.x = bbox.min.y= bbox.min.z = FLT_MAX;
+		bbox.max.x = bbox.max.y = bbox.max.z = -FLT_MAX;
+	};
+
+	inline void compute_bounding_box();
 };
+
+inline void Scene::compute_bounding_box() {
+	if(linear_nodes.size()>0) {
+		for(auto p_node : linear_nodes) {
+			XMFLOAT3 min = p_node->bbox.min;
+			XMFLOAT3 max = p_node->bbox.max;
+
+			if(min.x < bbox.min.x) { bbox.min.x = min.x; }
+			if(min.y < bbox.min.y) { bbox.min.y = min.y; }
+			if(min.z < bbox.min.z) { bbox.min.z = min.z; }
+			if(max.x > bbox.max.x) { bbox.max.x = max.x; }
+			if(max.y > bbox.max.y) { bbox.max.y = max.y; }
+			if(max.z > bbox.max.z) { bbox.max.z = max.z; }
+		}
+	}
+}
 
 struct Camera {
 	XMFLOAT4X4 clip_from_view;
@@ -606,7 +680,8 @@ void load_texture(tinygltf::Image &image, bool is_srgb, Texture &tex) {
 	// Mipmap generation!
 	int mip_levels = 1;
 	size_t image_with_mips_size = image_size;
-	uint8_t *p_image_with_mips_data = nullptr;
+	uint8_t *p_image_with_mips_data = p_image_data;
+	if(is_mipchain_generation_enabled)
 	{
 		auto is_power_of_2 = [](int value, int &power){
 			if((value && !(value & (value - 1)))) {
@@ -672,9 +747,11 @@ void load_texture(tinygltf::Image &image, bool is_srgb, Texture &tex) {
 	header.flags = 0;
 
 	load_texture(header, image.name, p_image_with_mips_data, tex);
+	if(is_mipchain_generation_enabled) {
+		free(p_image_with_mips_data);
+	}
 	
-	delete(p_image_with_mips_data);
-	if(image.component == 3) delete(p_image_data);
+	if(image.component == 3) free(p_image_data);
 }
 
 void load_textures(tinygltf::Model &gltf_model, Scene& scene) {
@@ -812,13 +889,13 @@ void load_node(Node *p_parent, const tinygltf::Node &node, uint32_t node_index, 
 		p_node->xm_scale = XMLoadFloat3(&scale);
 	}
 
-	if(node.matrix.size() == 16) {
-		p_node->xm_transform = XMMatrixSet(
+	if(node.matrix.size() == 16) { // gltf matrices are stored in column-major order
+		p_node->xm_transform = XMMatrixTranspose(XMMatrixSet(
 			node.matrix[0],  node.matrix[1],  node.matrix[2],  node.matrix[3],
 			node.matrix[4],  node.matrix[5],  node.matrix[6],  node.matrix[7],
 			node.matrix[8],  node.matrix[9],  node.matrix[10], node.matrix[11], 
 			node.matrix[12], node.matrix[13], node.matrix[14], node.matrix[15]
-		);
+		));
 	};
 
 	// Node with children
@@ -831,6 +908,7 @@ void load_node(Node *p_parent, const tinygltf::Node &node, uint32_t node_index, 
 	// Node contains mesh data
 	if(node.mesh > -1) {
 		const tinygltf::Mesh mesh = model.meshes[node.mesh];
+		BoundingBox bbox;
 		for(size_t i = 0; i < mesh.primitives.size(); i++) {
 			const tinygltf::Primitive &primitive = mesh.primitives[i];
 			if(primitive.indices < 0) {
@@ -852,8 +930,9 @@ void load_node(Node *p_parent, const tinygltf::Node &node, uint32_t node_index, 
 				const tinygltf::Accessor &posAccessor = model.accessors[it->second];
 				const tinygltf::BufferView &posView = model.bufferViews[posAccessor.bufferView];
 				p_pos_buffer = reinterpret_cast<const float *>(&(model.buffers[posView.buffer].data[posAccessor.byteOffset + posView.byteOffset]));
-				//posMin = glm::vec3(posAccessor.minValues[0], posAccessor.minValues[1], posAccessor.minValues[2]);
-				//posMax = glm::vec3(posAccessor.maxValues[0], posAccessor.maxValues[1], posAccessor.maxValues[2]);
+				
+				bbox.min = { static_cast<float>(posAccessor.minValues[0]), static_cast<float>(posAccessor.minValues[1]), static_cast<float>(posAccessor.minValues[2]) };
+				bbox.max = { static_cast<float>(posAccessor.maxValues[0]), static_cast<float>(posAccessor.maxValues[1]), static_cast<float>(posAccessor.maxValues[2]) };
 
 				it = primitive.attributes.find("NORMAL");
 				if( it != primitive.attributes.end()) {
@@ -926,6 +1005,7 @@ void load_node(Node *p_parent, const tinygltf::Node &node, uint32_t node_index, 
 			new_primitive.material_index = primitive.material;
 			new_primitive.first_index = index_buffer_start;
 			new_primitive.index_count = index_count;
+			new_primitive.bbox = bbox;
 			p_node->primitives.push_back(new_primitive);
 		}
 		Mesh *p_mesh = new Mesh();
@@ -933,6 +1013,9 @@ void load_node(Node *p_parent, const tinygltf::Node &node, uint32_t node_index, 
 		scene.meshes.push_back(p_mesh);
 		p_node->p_mesh = p_mesh;
 	}
+
+	p_node->compute_bounding_box();
+
 	if(p_node->p_parent) {
 		p_node->p_parent->children.push_back(p_node);
 	}
@@ -942,7 +1025,7 @@ void load_node(Node *p_parent, const tinygltf::Node &node, uint32_t node_index, 
 	scene.linear_nodes.push_back(p_node);
 }
 
-void load_scene(string asset_filename, Scene &scene) {
+void load_scene(string asset_filename, Scene &scene, bool flip_forward =false) {
 	tinygltf::Model gltf_model;
 	tinygltf::TinyGLTF gltf_ctx;
 	std::string err;
@@ -962,9 +1045,21 @@ void load_scene(string asset_filename, Scene &scene) {
 		load_node(nullptr, node, gltf_scene.nodes[i], gltf_model, index_buffer, vertex_buffer, scene);
 	}
 
+	scene.compute_bounding_box();
+	XMVECTOR xm_center = (XMLoadFloat3(&scene.bbox.min) + XMLoadFloat3(&scene.bbox.max)) / 2.0;
+	XMVECTOR xm_length = XMVector4Length(XMLoadFloat3(&scene.bbox.min) - XMLoadFloat3(&scene.bbox.max));
+	float scale = 2.0 / XMVectorGetX(xm_length);
+	XMMATRIX xm_change_of_base = XMMatrixSet(
+		1, 0, 0, 0,
+		0, 0, flip_forward ? -1 : 1, 0,
+		0, 1, 0, 0,
+		0, 0, 0, 1
+	);
+	scene.global_transform =  xm_change_of_base * XMMatrixScaling(scale, scale, scale) * XMMatrixTranspose(XMMatrixTranslationFromVector(xm_center));
+
 	for(auto node : scene.linear_nodes) {
 		if(node->p_mesh) {
-			node->update(transformations_cb);
+			node->update(transformations_cb, scene.global_transform);
 		}
 	}
 }
@@ -1479,16 +1574,28 @@ void init(HINSTANCE h_instance) {
 		}
 
 		{
+			//Texture *p_tex = new Texture();
+			//load_texture("ninomaru_teien_8k_cube_radiance.octrn", *p_tex);
+			//env_maps.push_back(p_tex);
+			//		
+			//p_tex = new Texture();
+			//load_texture("ninomaru_teien_8k_cube_irradiance.octrn", *p_tex);
+			//env_maps.push_back(p_tex);
+
+			//p_tex = new Texture();
+			//load_texture("ninomaru_teien_8k_cube_specular.octrn", *p_tex);
+			//env_maps.push_back(p_tex);
+
 			Texture *p_tex = new Texture();
-			load_texture("ninomaru_teien_8k_cube_radiance.octrn", *p_tex);
-			env_maps.push_back(p_tex);
-					
-			p_tex = new Texture();
-			load_texture("ninomaru_teien_8k_cube_irradiance.octrn", *p_tex);
+			load_texture("courtyard_night_cube_radiance.octrn", *p_tex);
 			env_maps.push_back(p_tex);
 
 			p_tex = new Texture();
-			load_texture("ninomaru_teien_8k_cube_specular.octrn", *p_tex);
+			load_texture("courtyard_night_cube_irradiance.octrn", *p_tex);
+			env_maps.push_back(p_tex);
+
+			p_tex = new Texture();
+			load_texture("courtyard_night_cube_specular.octrn", *p_tex);
 			env_maps.push_back(p_tex);
 
 			p_tex = new Texture();
@@ -1509,7 +1616,10 @@ void init(HINSTANCE h_instance) {
 		}
 
 		{
-			load_scene("C:/Users/Cerlet/Desktop/3D_models/pony_cartoon_gltf/scene.gltf", scene);
+			//load_scene("C:/Users/Cerlet/Desktop/3D_models/damagedHelmet/damagedHelmet.gltf", scene);
+			//load_scene("C:/Users/Cerlet/Desktop/3D_models/pony_cartoon_gltf/scene.gltf", scene, true);
+			//load_scene("C:/Users/Cerlet/Desktop/3D_models/vintage_suitcase/scene.gltf", scene, true);
+			load_scene("C:/Users/Cerlet/Desktop/3D_models/cvc_helmet/scene.gltf", scene);
 		}
 
 		{ 
@@ -1535,7 +1645,7 @@ void init(HINSTANCE h_instance) {
 		camera.near_plane_in_meters = 0.1;
 		camera.far_plane_in_meters = 256.0;
 
-		camera.pos_ws = { 0.7f, 0.0, 0.2f };
+		camera.pos_ws = { 0.0f, 0.0, 0.0f };
 		camera.dir_ws = { -1.0, 0.0, 0.0 };
 		camera.up_ws = { 0.0, 0.0, 1.0 };
 
@@ -1728,6 +1838,7 @@ void render_node(const Node &node, Material::AlphaMode alpha_mode) {
 
 void render_frame() {
 	float clear_color[] = { 0.f, 0.f, 0.f, 0.f };
+	auto gui_data = unq_gui->get_data();
 
 	CHECK_D3D12_CALL(a_com_command_allocators[frame_index]->Reset(),"");
 	CHECK_D3D12_CALL(com_command_list->Reset(a_com_command_allocators[frame_index].Get(), com_background_pso.Get()),"");
@@ -1773,6 +1884,8 @@ void render_frame() {
 
 	// Draw Background
 	com_command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+	uint32_t a_root_constants[] = { gui_data.background_env_map_type, gui_data.background_specular_irradiance_mip_level };
+	com_command_list->SetGraphicsRoot32BitConstants(0, count_of(a_root_constants), a_root_constants, 0);
 	com_command_list->DrawInstanced(4, 1, 0, 0);
 	
 	// Draw Opaque objects

@@ -59,6 +59,16 @@ void Gui::update(ID3D12GraphicsCommandList *p_command_list) {
 		ImGui::Text("Mouse Pos:  %.3f, %.3f", last_mouse_pos.x, last_mouse_pos.y);
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);	
 	}
+
+	{
+		ImGui::Separator();
+		ImGui::PushItemWidth(200);
+		ImGui::Text("Background: ");
+		const char* env_map_types[] = { "Radiance", "Diffuse Irradiance", "Specular Irradiance" };
+		ImGui::Combo("Environment Map Types", &unq_data->background_env_map_type, env_map_types, IM_ARRAYSIZE(env_map_types));
+		ImGui::SliderInt("Specular Irradiance Map Mip Level", &unq_data->background_specular_irradiance_mip_level, 0, 10);
+		ImGui::Separator();
+	}
 }
 
 const GuiData& Gui::get_data() {
