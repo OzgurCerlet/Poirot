@@ -123,10 +123,8 @@ PsOutput ps_main(PsInput input) {
         metallic *= metallic_roughness.x;
         roughness *= metallic_roughness.y;
     }
-    else {
-        metallic = clamp(metallic, 0.0, 1.0);
-        roughness = clamp(roughness, k_min_roughness, 1.0);
-    }
+    metallic = clamp(metallic, 0.0, 1.0);
+    roughness = clamp(roughness, k_min_roughness, 1.0);
 
     float3 normal_ws = normalize(input.normal_ws);
     if (mat_data.normal_texture_index >= 0) {
@@ -141,14 +139,16 @@ PsOutput ps_main(PsInput input) {
     float3 view_ws = normalize(cam_pos_ws - input.pos_ws);
     float3 reflected_ws = -normalize(reflect(view_ws, normal_ws));
     float NdotV = clamp(abs(dot(normal_ws, view_ws)), 0.001, 1.0);
-    
-    float lod = roughness * 10.0;
-    float2 brdf = env_brdf_lut.Sample(trilinear_clamp, float2(NdotV, 1.0 - roughness)).xy;
-    float3 diffuseLight = env_map_irradiance.Sample(trilinear_clamp, normal_ws).rgb;
-    float3 specularLight = env_map_specular.SampleLevel(trilinear_clamp, reflected_ws, lod).rgb;
 
-    float3 diffuse = diffuseLight * diffuse_color;
-    float3 specular = specularLight * (specular_color * brdf.x + brdf.y);
+    float2 brdf = env_brdf_lut.Sample(trilinear_clamp, float2(NdotV, 1.0 - roughness)).xy;
+    float3 diffuse_irradiance = env_map_irradiance.Sample(trilinear_clamp, normal_ws).rgb;
+    
+    uint mip_level = 0, width = 0, height = 0, mip_count = 0;
+    env_map_specular.GetDimensions(mip_level, width, height, mip_count);
+    float3 specular_irradiance = env_map_specular.SampleLevel(trilinear_clamp, reflected_ws, roughness * mip_count).rgb;
+
+    float3 diffuse = diffuse_irradiance * diffuse_color;
+    float3 specular = specular_irradiance * (specular_color * brdf.x + brdf.y);
 
     float3 color = diffuse + specular;
 

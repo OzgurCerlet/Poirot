@@ -135,7 +135,6 @@
     <ClInclude Include="external\tiny_gltf\stb_image_write.h" />
     <ClInclude Include="external\tiny_gltf\tiny_gltf.h" />
     <ClInclude Include="Gui.h" />
-    <ClInclude Include="resource.h" />
     <ClInclude Include="Window.h" />
   </ItemGroup>
   <ItemGroup>

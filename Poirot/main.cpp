@@ -74,21 +74,21 @@ ComPtr<ID3D12Device> com_device{ nullptr };
 ComPtr<ID3D12CommandQueue> com_command_queue{ nullptr };
 ComPtr<IDXGISwapChain3> com_swap_chain{ nullptr };
 
-ComPtr<ID3D12DescriptorHeap> com_dsv_heap = nullptr;
-ComPtr<ID3D12Resource> com_dsv = nullptr;
+ComPtr<ID3D12DescriptorHeap> com_dsv_heap{ nullptr };
+ComPtr<ID3D12Resource> com_dsv{ nullptr };
 
 array<ComPtr<ID3D12CommandAllocator>, max_inflight_frame_count> a_com_command_allocators{};
-ComPtr<ID3D12GraphicsCommandList> com_command_list = nullptr;
+ComPtr<ID3D12GraphicsCommandList> com_command_list{ nullptr };
 
-array<uint64_t, max_inflight_frame_count> a_fence_values = {};
-ComPtr<ID3D12Fence> com_fence = nullptr;
-HANDLE h_fence_event = 0;
+array<uint64_t, max_inflight_frame_count> a_fence_values{};
+ComPtr<ID3D12Fence> com_fence{ nullptr };
+HANDLE h_fence_event{ 0 };
 
-ComPtr<ID3D12PipelineState> com_scene_opaque_pso = nullptr;
-ComPtr<ID3D12PipelineState> com_scene_alpha_blend_pso = nullptr;
-ComPtr<ID3D12PipelineState> com_background_pso = nullptr;
-ComPtr<ID3D12PipelineState> com_final_pso = nullptr;
-ComPtr<ID3D12RootSignature> com_root_signature = nullptr;
+ComPtr<ID3D12PipelineState> com_scene_opaque_pso{ nullptr };
+ComPtr<ID3D12PipelineState> com_scene_alpha_blend_pso{ nullptr };
+ComPtr<ID3D12PipelineState> com_background_pso{ nullptr };
+ComPtr<ID3D12PipelineState> com_final_pso{ nullptr };
+ComPtr<ID3D12RootSignature> com_root_signature{ nullptr };
 
 struct PerFrameConstantBuffer {
 	__declspec(align(256)) struct {
@@ -113,16 +113,16 @@ struct ObjectTransformationsConstantBuffer {
 };
 
 struct MaterialData {
-	XMFLOAT4 base_color_factor = {1,1,1,1};
-	float metallic_factor = 1.0;
-	float roughness_factor = 1.0 ;
-	float alpha_mask_cutoff = 0.0;
-	int base_color_texture_index = -1;	
-	int normal_texture_index = -1;
-	int metallic_roughness_texture_index =-1;
-	int emissive_texture_index =-1;
-	int occlusion_texture_index =-1;	
-	int is_alpha_masked = 0;
+	XMFLOAT4 base_color_factor{1,1,1,1};
+	float metallic_factor{ 1.0 };
+	float roughness_factor{ 1.0 };
+	float alpha_mask_cutoff{ 0.0 };
+	int base_color_texture_index{ -1 };
+	int normal_texture_index{ -1 };
+	int metallic_roughness_texture_index{ -1 };
+	int emissive_texture_index{ -1 };
+	int occlusion_texture_index{ -1 };
+	int is_alpha_masked{ 0 };
 	float __pad[3];
 };
 
@@ -173,21 +173,21 @@ struct RenderBuffer {
 
 struct Material {
 	enum AlphaMode { ALPHAMODE_OPAQUE, ALPHAMODE_MASK, ALPHAMODE_BLEND };
-	AlphaMode alphaMode = ALPHAMODE_OPAQUE;
-	float alpha_cutoff = 1.0f;
-	float metallic_factor = 1.0f;
-	float roughness_factor = 1.0f;
-	XMFLOAT4 basecolor_factor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-	Texture *basecolor_texture;
-	Texture *metallic_roughness_texture;
-	Texture *normal_texture;
-	Texture *occlusion_texture;
-	Texture *emissive_texture;
-	int base_color_texture_index = -1;
-	int normal_texture_index = -1;
-	int metallic_roughness_texture_index = -1;
-	int emissive_texture_index = -1;
-	int occlusion_texture_index = -1;
+	AlphaMode alphaMode{ ALPHAMODE_OPAQUE };
+	float alpha_cutoff{ 1.0f };
+	float metallic_factor{ 1.0f };
+	float roughness_factor{ 1.0f };
+	XMFLOAT4 basecolor_factor{ 1.0f, 1.0f, 1.0f, 1.0f };
+	Texture *basecolor_texture{nullptr};
+	Texture *metallic_roughness_texture{ nullptr };
+	Texture *normal_texture{ nullptr };
+	Texture *occlusion_texture{ nullptr };
+	Texture *emissive_texture{ nullptr };
+	int base_color_texture_index{ -1 };
+	int normal_texture_index{ -1 };
+	int metallic_roughness_texture_index{ -1 };
+	int emissive_texture_index{ -1 };
+	int occlusion_texture_index{ -1 };
 };
 
 struct BoundingBox {
@@ -290,7 +290,7 @@ struct Scene {
 	vector<Node*> nodes;
 	vector<Node*> linear_nodes;
 	BoundingBox bbox;
-	uint32_t desc_heap_index;
+	uint32_t desc_heap_start_index;
 	uint32_t num_used_descs;
 
 	Scene() {
@@ -304,8 +304,8 @@ struct Scene {
 inline void Scene::compute_bounding_box() {
 	if(linear_nodes.size()>0) {
 		for(auto p_node : linear_nodes) {
-			XMFLOAT3 min = p_node->bbox.min;
-			XMFLOAT3 max = p_node->bbox.max;
+			auto min = p_node->bbox.min;
+			auto max = p_node->bbox.max;
 
 			if(min.x < bbox.min.x) { bbox.min.x = min.x; }
 			if(min.y < bbox.min.y) { bbox.min.y = min.y; }
@@ -338,10 +338,10 @@ struct Camera {
 
 struct DescriptorHeap{
 	ComPtr<ID3D12DescriptorHeap> com_heap;
+	D3D12_GPU_DESCRIPTOR_HANDLE base_gpu_descriptor;
 	uint32_t num_max_descriptors;
 	uint32_t num_used_descriptors;
 	uint32_t descriptor_increment_size;
-	D3D12_GPU_DESCRIPTOR_HANDLE base_gpu_descriptor;
 	D3D12_DESCRIPTOR_HEAP_TYPE type;
 	bool is_shader_visible;
 
@@ -376,29 +376,23 @@ struct DescriptorHeap{
 };
 
 
-array<RenderBuffer, max_inflight_frame_count> a_back_buffers = {};
-RenderBuffer hdr_buffer = { back_buffer_width , back_buffer_height, DXGI_FORMAT_R16G16B16A16_FLOAT, true, is_msaa_enabled };
-RenderBuffer hdr_buffer_resolved = { back_buffer_width , back_buffer_height, DXGI_FORMAT_R16G16B16A16_FLOAT, true, false };
+array<RenderBuffer, max_inflight_frame_count> a_back_buffers {};
+RenderBuffer hdr_buffer { back_buffer_width , back_buffer_height, DXGI_FORMAT_R16G16B16A16_FLOAT, true, is_msaa_enabled };
+RenderBuffer hdr_buffer_resolved { back_buffer_width , back_buffer_height, DXGI_FORMAT_R16G16B16A16_FLOAT, true, false };
 
-DescriptorHeap source_srv_desc_heap = { 256u, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV , false};
-DescriptorHeap target_srv_desc_heap = { max_descriptor_count_per_frame * max_inflight_frame_count, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV , true };
-DescriptorHeap rtv_desc_heap = { 64u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV , false };
+DescriptorHeap source_srv_desc_heap { 256u, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV , false};
+DescriptorHeap target_srv_desc_heap { max_descriptor_count_per_frame * max_inflight_frame_count, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV , true };
+DescriptorHeap rtv_desc_heap { 64u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV , false };
 
 array<Texture, max_texture_count> a_textures{};
-vector<Texture*> env_maps = {};
-Texture mesh_albedo = {};
-Mesh mesh = {};
+vector<Texture*> env_maps{};
 
-PerFrameConstantBuffer per_frame_cb = {};
-ObjectTransformationsConstantBuffer transformations_cb = {};
-MaterialDataConstantBuffer material_data_cb = {};
+PerFrameConstantBuffer per_frame_cb{};
+ObjectTransformationsConstantBuffer transformations_cb{};
+MaterialDataConstantBuffer material_data_cb{};
 
 Camera camera;
-vector<Scene*> scenes = {};
-
-float view_zenith_angle_rad = XMConvertToRadians(45.0);
-float view_azimuth_angle_rad = XMConvertToRadians(0.0);
-float view_distance_in_meters = 10.0;
+vector<Scene*> scenes{};
 
 inline void check_win32_call(HANDLE h) {
 	if(h == NULL) { throw std::exception(); };
@@ -524,10 +518,10 @@ void load_mesh(string asset_filename, Mesh &mesh) {
 			throw exception("Couldn't open a necessary file\n");
 		}
 
-		OctarineMeshHeader header = {};
-		void *p_data = nullptr;
+		OctarineMeshHeader header{};
+		void *p_data{ nullptr };
 
-		OCTARINE_MESH_RESULT result = octarine_mesh_read_from_file(asset_filename.c_str(), &header, &p_data);
+		auto result = octarine_mesh_read_from_file(asset_filename.c_str(), &header, &p_data);
 		if(result != OCTARINE_MESH_OK) { string msg = "File error: " + asset_filename; throw exception(msg.c_str()); };
 
 		uint32_t vertex_size = sizeof(Vertex);
@@ -541,7 +535,7 @@ void load_mesh(string asset_filename, Mesh &mesh) {
 	}
 }
 
-void load_texture(OctarineImageHeader header, string texture_name, void *p_src_data, DescriptorHeap &srv_heap, Texture &tex) {
+void load_texture(OctarineImageHeader header, string texture_name, const void *p_src_data, DescriptorHeap &srv_heap, Texture &tex) {
 
 	UINT num_subresources = header.array_size * header.mip_levels;
 	UINT64 *p_src_subresource_offsets = reinterpret_cast<UINT64*>(alloca(sizeof(UINT64)*num_subresources));
@@ -765,7 +759,7 @@ void load_texture(tinygltf::Image &image, bool is_srgb, DescriptorHeap &srv_heap
 		free(p_image_with_mips_data);
 	}
 	
-	if(image.component == 3) free(p_image_data);
+	if(image.component == 3) delete[](p_image_data);
 }
 
 void load_textures(tinygltf::Model &gltf_model, Scene& scene, DescriptorHeap &srv_heap) {
@@ -789,92 +783,68 @@ void load_textures(tinygltf::Model &gltf_model, Scene& scene, DescriptorHeap &sr
 	};
 
 	int image_index = 0;
-	scene.desc_heap_index = srv_heap.num_used_descriptors;
+	scene.desc_heap_start_index = srv_heap.num_used_descriptors;
 	for(auto &image : gltf_model.images) {
 		Texture* p_tex = new Texture;
 		load_texture(image, is_srgb(image_index++), srv_heap, *p_tex);
 		scene.textures.push_back(p_tex);
 	}
-	scene.num_used_descs = srv_heap.num_used_descriptors - scene.desc_heap_index;
+	scene.num_used_descs = srv_heap.num_used_descriptors - scene.desc_heap_start_index;
 }
 
-void load_materials(tinygltf::Model &gltf_model, Scene &scene) {
-	uint32_t material_index = 0;
-	uint32_t num_already_used_indices = scene.desc_heap_index;
+void load_materials(const tinygltf::Model &gltf_model, Scene &scene) {
+
 	for(auto &mat : gltf_model.materials) {
-		int desc_index = 0;
+		
 		Material *p_material = new Material();
 	
-		auto it = mat.values.find("baseColorTexture");
-		if( it != mat.values.end()) {
-			Texture *p_texture = scene.textures[gltf_model.textures[it->second.TextureIndex()].source];
-			p_material->basecolor_texture = p_texture;
-			p_material->base_color_texture_index = p_texture->srv_descriptor_table_index - num_already_used_indices;
+		if(auto it = mat.values.find("baseColorTexture"); it != mat.values.end()) {
+			p_material->base_color_texture_index = it->second.TextureIndex();
+		}
+			
+		if(auto it = mat.additionalValues.find("normalTexture"); it != mat.additionalValues.end()) {
+			p_material->normal_texture_index = it->second.TextureIndex();
+		}
+			
+		if(auto it = mat.additionalValues.find("occlusionTexture"); it != mat.additionalValues.end()) {
+			p_material->occlusion_texture_index = it->second.TextureIndex();
 		}
 		
-		it = mat.additionalValues.find("normalTexture");
-		if(it != mat.additionalValues.end()) {
-			Texture *p_texture = scene.textures[gltf_model.textures[it->second.TextureIndex()].source];
-			p_material->normal_texture = p_texture;
-			p_material->normal_texture_index = p_texture->srv_descriptor_table_index - num_already_used_indices;
+		if(auto it = mat.values.find("metallicRoughnessTexture"); it != mat.values.end()) {
+			p_material->metallic_roughness_texture_index = it->second.TextureIndex();
+		}
+			
+		if(auto it = mat.additionalValues.find("emissiveTexture"); it != mat.additionalValues.end()) {
+			p_material->emissive_texture_index = it->second.TextureIndex();
 		}
 		
-		it = mat.additionalValues.find("occlusionTexture");
-		if(it != mat.additionalValues.end()) {
-			Texture *p_texture = scene.textures[gltf_model.textures[it->second.TextureIndex()].source];
-			p_material->occlusion_texture = p_texture;
-			p_material->occlusion_texture_index = p_texture->srv_descriptor_table_index - num_already_used_indices;
-		}
-		
-		it = mat.values.find("metallicRoughnessTexture");
-		if(it != mat.values.end()) {
-			Texture *p_texture = scene.textures[gltf_model.textures[it->second.TextureIndex()].source];
-			p_material->metallic_roughness_texture = p_texture;
-			p_material->metallic_roughness_texture_index = p_texture->srv_descriptor_table_index- num_already_used_indices;
-		}
-		
-		it = mat.additionalValues.find("emissiveTexture");
-		if(it != mat.additionalValues.end()) {
-			Texture *p_texture = scene.textures[gltf_model.textures[it->second.TextureIndex()].source];
-			p_material->emissive_texture = p_texture;
-			p_material->emissive_texture_index = p_texture->srv_descriptor_table_index - num_already_used_indices;
-		}
-		
-		it = mat.values.find("roughnessFactor");
-		if(it != mat.values.end()) {
-			p_material->roughness_factor = static_cast<float>(mat.values["roughnessFactor"].Factor());
+		if(auto it = mat.values.find("roughnessFactor"); it != mat.values.end()) {
+			p_material->roughness_factor = static_cast<float>(it->second.Factor());
 		}
 
-		it = mat.values.find("metallicFactor");
-		if(it != mat.values.end()) {
-			p_material->metallic_factor = static_cast<float>(mat.values["metallicFactor"].Factor());
+		if(auto it = mat.values.find("metallicFactor"); it != mat.values.end()) {
+			p_material->metallic_factor = static_cast<float>(it->second.Factor());
 		}
 
-		it = mat.values.find("baseColorFactor");
-		if(it != mat.values.end()) {
-			tinygltf::ColorValue color = mat.values["baseColorFactor"].ColorFactor();
+		if(auto it = mat.values.find("baseColorFactor"); it != mat.values.end()) {
+			auto color = it->second.ColorFactor();
 			p_material->basecolor_factor = XMFLOAT4(color[0], color[1], color[2], color[3]);
 		}
 
-		it = mat.additionalValues.find("alphaMode");
-		if(it != mat.additionalValues.end()) {
-			tinygltf::Parameter param = mat.additionalValues["alphaMode"];
-			if(param.string_value == "BLEND") {
+		if(auto it = mat.additionalValues.find("alphaMode"); it != mat.additionalValues.end()) {
+			if(it->second.string_value == "BLEND") {
 				p_material->alphaMode = Material::ALPHAMODE_BLEND;
 			}
-			if(param.string_value == "MASK") {
+			if(it->second.string_value == "MASK") {
 				p_material->alphaMode = Material::ALPHAMODE_MASK;
 			}
 		}
 		
-		it = mat.additionalValues.find("alphaCutoff");
-		if( it != mat.additionalValues.end()) {
-			p_material->alpha_cutoff = static_cast<float>(mat.additionalValues["alphaCutoff"].Factor());
+		if(auto it = mat.additionalValues.find("alphaCutoff"); it != mat.additionalValues.end()) {
+			p_material->alpha_cutoff = static_cast<float>(it->second.Factor());
 		}
 
-
 		scene.materials.push_back(p_material);
-		++material_index;
 	}
 }
 
@@ -1037,7 +1007,7 @@ void load_node(Node *p_parent, const tinygltf::Node &node, uint32_t node_index, 
 	scene.linear_nodes.push_back(p_node);
 }
 
-void load_scene(string asset_filename, Scene &scene, bool flip_forward =false) {
+void load_scene(string asset_filename, Scene &scene, bool flip_forward = false) {
 	tinygltf::Model gltf_model;
 	tinygltf::TinyGLTF gltf_ctx;
 	std::string err;
@@ -1377,8 +1347,8 @@ void init(HINSTANCE h_instance) {
 
 	unq_window = make_unique<Window>(h_instance, back_buffer_width, back_buffer_height);
 	{
-		ComPtr<IDXGIFactory5> com_dxgi_factory = nullptr;
-		vector<ComPtr<IDXGIAdapter1>> v_com_dxgi_adapters = {};
+		ComPtr<IDXGIFactory5> com_dxgi_factory { nullptr };
+		vector<ComPtr<IDXGIAdapter1>> v_com_dxgi_adapters {};
 		v_com_dxgi_adapters.reserve(4);
 
 		UINT factory_flags = 0;
@@ -1454,7 +1424,7 @@ void init(HINSTANCE h_instance) {
 			target_srv_desc_heap.init();
 		}
 
-		{			
+		{ // Initialize render buffers
 			for(int buffer_index = 0; buffer_index < max_inflight_frame_count; ++buffer_index) {
 				CHECK_DXGI_CALL(com_swap_chain->GetBuffer(buffer_index, IID_PPV_ARGS(&(a_back_buffers[buffer_index].com_resource))));
 				D3D12_RESOURCE_DESC desc = a_back_buffers[buffer_index].com_resource->GetDesc();
@@ -1584,10 +1554,6 @@ void init(HINSTANCE h_instance) {
 		}
 
 		{
-			//load_mesh("Pony_cartoon.octrn", mesh);
-		}
-
-		{
 			//Texture *p_tex = new Texture();
 			//load_texture("ninomaru_teien_8k_cube_radiance.octrn", *p_tex);
 			//env_maps.push_back(p_tex);
@@ -1664,14 +1630,15 @@ void init(HINSTANCE h_instance) {
 			for(auto texture : scene->textures) {
 				texture->com_upload.Reset();
 			}
-			//for(auto mesh : scene->) {
-			//	texture->com_upload.Reset();
-			//}
+			for(auto mesh : scene->meshes) {
+				mesh->com_vertex_upload_buffer.Reset();
+				mesh->com_index_upload_buffer.Reset();
+			}
 		}
 	}
 
-	D3D12_CPU_DESCRIPTOR_HANDLE gui_font_srv_cpu_desc_handle = target_srv_desc_heap.get_cpu_handle(target_srv_desc_heap.num_used_descriptors);
-	D3D12_GPU_DESCRIPTOR_HANDLE gui_font_srv_gpu_desc_handle = target_srv_desc_heap.get_gpu_handle(target_srv_desc_heap.num_used_descriptors);
+	auto gui_font_srv_cpu_desc_handle = target_srv_desc_heap.get_cpu_handle(target_srv_desc_heap.num_used_descriptors);
+	auto gui_font_srv_gpu_desc_handle = target_srv_desc_heap.get_gpu_handle(target_srv_desc_heap.num_used_descriptors);
 	target_srv_desc_heap.num_used_descriptors++;
 	unq_gui = make_unique<Gui>(unq_window->get_handle(), max_inflight_frame_count, com_device.Get(), back_buffer_format, gui_font_srv_cpu_desc_handle, gui_font_srv_gpu_desc_handle);
 
@@ -1757,7 +1724,7 @@ void update() {
 		static float prev_strafe = 0.0f;
 		static float prev_ascent = 0.0f;
 
-		auto dampen = [&](float &prev_val, float &new_val) {
+		auto dampen_motion = [&](float &prev_val, float &new_val) {
 			float blended_val;
 			XMVECTOR xm_blended_val;
 			XMVECTOR xm_prev_val = XMLoadFloat(&prev_val);
@@ -1771,9 +1738,9 @@ void update() {
 			new_val = blended_val;
 		};
 
-		dampen(prev_forward, forward);
-		dampen(prev_strafe, strafe);
-		dampen(prev_ascent, ascent);
+		dampen_motion(prev_forward, forward);
+		dampen_motion(prev_strafe, strafe);
+		dampen_motion(prev_ascent, ascent);
 
 		//{
 		//	auto cos_theta = cos(XMConvertToRadians(gui_data.view_zenith_angle_in_degrees));
@@ -1900,7 +1867,7 @@ void update() {
 		com_device->CopyDescriptorsSimple(
 			p_scene->num_used_descs,
 			target_srv_desc_heap.get_cpu_handle(target_heap_start_index + num_source_static_descs + num_descriptor_per_environment),
-			source_srv_desc_heap.get_cpu_handle(p_scene->desc_heap_index),
+			source_srv_desc_heap.get_cpu_handle(p_scene->desc_heap_start_index),
 			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
 		);
 	}

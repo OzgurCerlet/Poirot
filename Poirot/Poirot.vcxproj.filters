@@ -86,9 +86,6 @@
     <ClInclude Include="external\stb\stb_image_resize.h">
       <Filter>Source Files\external\stb</Filter>
     </ClInclude>
-    <ClInclude Include="resource.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="shaders\pbs_vs.hlsl">
