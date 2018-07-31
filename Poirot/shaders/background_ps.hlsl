@@ -13,9 +13,9 @@ cbuffer PerDrawConstants : register(b2) {
     uint mip_level;
 }
 
-TextureCube env_map_radiance    : register(t0, space1);
-TextureCube env_map_irradiance  : register(t1, space1);
-TextureCube env_map_specular    : register(t2, space1);
+TextureCube env_map_radiance    : register(t1, space1);
+TextureCube env_map_irradiance  : register(t2, space1);
+TextureCube env_map_specular    : register(t3, space1);
 
 SamplerState trilinear_clamp    : register(s0);
 

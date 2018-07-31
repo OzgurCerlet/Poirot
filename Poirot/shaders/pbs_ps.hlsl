@@ -41,9 +41,9 @@ struct PsOutput {
     float4 color    : SV_TARGET;
 };
 
-TextureCube env_map_irradiance  : register(t1, space1);
-TextureCube env_map_specular    : register(t2, space1);
-Texture2D env_brdf_lut          : register(t3, space1);
+Texture2D env_brdf_lut          : register(t0, space1);
+TextureCube env_map_irradiance  : register(t2, space1);
+TextureCube env_map_specular    : register(t3, space1);
 
 Texture2D a_material_textures[] : register(t0, space2);
 

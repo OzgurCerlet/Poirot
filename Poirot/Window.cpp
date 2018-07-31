@@ -1,9 +1,11 @@
 #include "Window.h"
 
 Window::Window(HINSTANCE h_instance, uint16_t width, uint16_t height) : _h_instance(h_instance), _width(width), _height(height) {
+
 	WNDCLASSEX window_class = { 0 };
 	window_class.cbSize = sizeof(WNDCLASSEX);
 	window_class.style = CS_HREDRAW | CS_VREDRAW;
+	window_class.hIcon = (HICON)(LoadImage(NULL, "poirot.ico", IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE));
 	window_class.lpfnWndProc = window_proc;
 	window_class.hInstance = _h_instance;
 	window_class.lpszClassName = "Poirot Window Class";
