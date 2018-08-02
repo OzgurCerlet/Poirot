@@ -140,9 +140,10 @@ namespace scene_manager
 				uint8_t* p_rgba = p_image_data;
 				uint8_t* p_rgb = &image.image[0];
 				for(size_t i = 0; i < image.width * image.height; ++i) {
-					for(int32_t j = 0; j < 3; ++j) {
-						p_rgba[j] = p_rgb[j];
-					}
+					p_rgba[0] = p_rgb[0];
+					p_rgba[1] = p_rgb[1];
+					p_rgba[2] = p_rgb[2];
+					p_rgba[3] = 255;
 					p_rgba += 4;
 					p_rgb += 3;
 				}
