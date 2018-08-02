@@ -605,6 +605,9 @@ namespace scene_manager
 			renderer::load_texture("ninomaru_teien_8k_cube_radiance.octrn", tex_index);
 			renderer::load_texture("ninomaru_teien_8k_cube_irradiance.octrn", tex_index);
 			renderer::load_texture("ninomaru_teien_8k_cube_specular.octrn", tex_index);
+			renderer::load_texture("paul_lobe_haus_8k_cube_radiance.octrn", tex_index);
+			renderer::load_texture("paul_lobe_haus_8k_cube_irradiance.octrn", tex_index);
+			renderer::load_texture("paul_lobe_haus_8k_cube_specular.octrn", tex_index);
 		}
 
 		{ // Load sample scenes

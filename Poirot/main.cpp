@@ -74,9 +74,8 @@ void update() {
 }
 
 void render_frame() {
-	auto gui_data = gui::get_data();
 	renderer::begin_render();
-	renderer::render(gui_data);
+	renderer::render();
 	gui::render();
 	renderer::end_render();
 }

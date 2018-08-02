@@ -65,6 +65,15 @@ namespace gui
 
 		{
 			ImGui::PushItemWidth(200);
+			ImGui::Text("View: ");
+			const char* a_isolation_modes[] = { "None", "Base Color", "Metallic", "Roughness", "Normal", "Opacity", "Emission", "Diffuse Response", "Specular Response" };
+			ImGui::Combo("Isolation Mode", reinterpret_cast<int*>(&gui_data.isolation_mode_index), a_isolation_modes, IM_ARRAYSIZE(a_isolation_modes));
+		}
+
+		ImGui::Separator();
+
+		{
+			ImGui::PushItemWidth(200);
 			ImGui::Text("Model: ");
 			const char* a_scenes[] = { "CVC Helmet", "Damaged Sci-fi Helmet", "Cartoon Pony", "Vintage Suitcase" };
 			ImGui::Combo("Model", reinterpret_cast<int*>(&gui_data.model_scene_index), a_scenes, IM_ARRAYSIZE(a_scenes));
@@ -75,7 +84,7 @@ namespace gui
 		{
 			ImGui::PushItemWidth(200);
 			ImGui::Text("Image Based Lighting: ");
-			const char* a_environments[] = { "Courtyard Night", "Ninomaru Teien" };
+			const char* a_environments[] = { "Courtyard Night", "Ninomaru Teien", "Paul Lobe Haus" };
 			ImGui::Combo("Environment", reinterpret_cast<int*>(&gui_data.ibl_environment_index), a_environments, IM_ARRAYSIZE(a_environments));
 		}
 
@@ -87,6 +96,13 @@ namespace gui
 			const char* a_env_map_types[] = { "Radiance", "Diffuse Irradiance", "Specular Irradiance" };
 			ImGui::Combo("Environment Map Types", reinterpret_cast<int*>(&gui_data.background_env_map_type), a_env_map_types, IM_ARRAYSIZE(a_env_map_types));
 			ImGui::SliderInt("Specular Irradiance Map Mip Level", reinterpret_cast<int*>(&gui_data.background_specular_irradiance_mip_level), 0, 10);
+		}
+
+		ImGui::Separator();
+
+		{
+			ImGui::PushItemWidth(200);
+			ImGui::SliderFloat("Test", &gui_data.test, 0.0, 1.0);
 		}
 	}
 

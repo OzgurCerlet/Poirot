@@ -34,14 +34,13 @@ VsOutput vs_main(VsInput input) {
     VsOutput result = (VsOutput) 0;
     
     float4x4 world_from_object = a_world_from_object[transform_index];
-    float3 pos_ws = mul(world_from_object, float4(input.pos_os, 1.0));
-    float3 pos_vs = mul(view_from_world, float4(pos_ws, 1.0));
+    float3 pos_ws = mul(world_from_object, float4(input.pos_os, 1.0)).xyz;
+    float3 pos_vs = mul(view_from_world, float4(pos_ws, 1.0)).xyz;
 
     result.pos_ws = pos_ws;
     result.pos_vs = pos_vs;
     result.pos_cs = mul(clip_from_view, float4(pos_vs, 1.0));
-    //result.normal_ws = mul(world_from_object, float4(normalize(input.normal_os), 0.0));// assume uniform scale
-    result.normal_ws = normalize(input.normal_os); // assume uniform scale
+    result.normal_ws = mul(world_from_object, float4(normalize(input.normal_os), 0.0)).xyz;// assume uniform scale
     result.uv = input.uv;
 
     return result;

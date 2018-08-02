@@ -27,6 +27,8 @@ cbuffer MaterialDataCB : register(b1) {
 cbuffer PerDrawConstants : register(b2) {
     uint transform_index;
     uint material_index;
+    uint isolation_mode_index;
+    uint test_factor;
 }
 
 struct PsInput {
@@ -55,10 +57,10 @@ static const float k_min_roughness = 0.04;
 // See http://www.thetenthplanet.de/archives/1180
 float3x3 cotangent_frame(float3 normal_ws, float3 pos_ws, float2 uv) {
     // get edge vectors of the pixel triangle
-    float3 dp1 = ddx(pos_ws);
-    float3 dp2 = ddy(pos_ws);
-    float2 duv1 = ddx(uv);
-    float2 duv2 = ddy(uv);
+    float3 dp1 = ddx_fine(pos_ws);
+    float3 dp2 = ddy_fine(pos_ws);
+    float2 duv1 = ddx_fine(uv);
+    float2 duv2 = ddy_fine(uv);
  
     // solve the linear system
     float3 dp2perp = cross(dp2, normal_ws);
@@ -69,29 +71,12 @@ float3x3 cotangent_frame(float3 normal_ws, float3 pos_ws, float2 uv) {
     // construct a scale-invariant frame 
     float inv_max = 1.0 / sqrt(max(dot(tangent_ws, tangent_ws), dot(bitangent_ws, bitangent_ws)));
     //float3x3(tangent_ws * inv_max, bitangent_ws * inv_max, normal_ws) INVESTIGATE the difference!
-    return transpose(float3x3(bitangent_ws * inv_max, tangent_ws * inv_max,  normal_ws)); 
+    return transpose(float3x3(bitangent_ws * inv_max, tangent_ws * inv_max,  normal_ws));
 }
 
 float3 compute_normal(PsInput input, float3 normal_ws, Texture2D normal_texture) {
-
-#if 1
-    
-    float3x3 world_from_tangent = cotangent_frame(normal_ws, input.pos_ws, input.uv);
-
-#else
-
-    float3 pos_dx = ddx(input.pos_ws);
-    float3 pos_dy = ddy(input.pos_ws);
-    float2 tex_dx = ddx(input.uv);
-    float2 tex_dy = ddy(input.uv);
-    float3 t = (tex_dy.y * pos_dx - tex_dx.y * pos_dy) / (tex_dx.x * tex_dy.y - tex_dy.x * tex_dx.y);
-    t = normalize(t - normal_ws * dot(normal_ws, t));
-    float3 b = normalize(cross(normal_ws, t));
-
-    float3x3 world_from_tangent = transpose(float3x3(b, t, normal_ws));
-#endif
-    
-    float3 normal_ts = normal_texture.Sample(trilinear_wrap_ai16, input.uv).rgb * 2.0 - 1.0;
+    float3x3 world_from_tangent = cotangent_frame(normal_ws, input.pos_ws, input.uv); 
+    float3 normal_ts = normalize(normal_texture.Sample(trilinear_wrap_ai16, input.uv).rgb * 2.0 - 1.0);
     normal_ws = normalize(mul(world_from_tangent, normal_ts));
     
     return normal_ws;
@@ -128,7 +113,7 @@ PsOutput ps_main(PsInput input) {
 
     float3 normal_ws = normalize(input.normal_ws);
     if (mat_data.normal_texture_index >= 0) {
-        normal_ws = compute_normal(input, normal_ws, a_material_textures[mat_data.normal_texture_index]);
+        normal_ws = compute_normal(input, normal_ws, a_material_textures[mat_data.normal_texture_index]);  
     }
 
     float3 f0 = 0.04;
@@ -145,18 +130,32 @@ PsOutput ps_main(PsInput input) {
     
     uint mip_level = 0, width = 0, height = 0, mip_count = 0;
     env_map_specular.GetDimensions(mip_level, width, height, mip_count);
-    float3 specular_irradiance = env_map_specular.SampleLevel(trilinear_clamp, reflected_ws, roughness * mip_count).rgb;
+    float3 specular_irradiance = env_map_specular.SampleLevel(trilinear_clamp, reflected_ws, roughness * (mip_count - 1)).rgb;
 
     float3 diffuse = diffuse_irradiance * diffuse_color;
     float3 specular = specular_irradiance * (specular_color * brdf.x + brdf.y);
 
     float3 color = diffuse + specular;
 
+    float3 emission = 0;
     if (mat_data.emissive_texture_index >= 0) {
-        float3 emission = a_material_textures[mat_data.emissive_texture_index].Sample(trilinear_wrap_ai16, input.uv).rgb;
+        emission = a_material_textures[mat_data.emissive_texture_index].Sample(trilinear_wrap_ai16, input.uv).rgb;
         color += emission;
     }
-
+ 
     result.color = float4(color.rgb, base_color.a);
+    
+    switch (isolation_mode_index) {
+        case 1: result.color = base_color; break;
+        case 2: result.color = (float4) metallic; break;
+        case 3: result.color = (float4) roughness; break;
+        case 4: result.color = float4(normal_ws, 1.0) * 0.5 + 0.5; break;
+        case 5: result.color = (float4) base_color.a; break;
+        case 6: result.color = float4(emission, 1.0); break;
+        case 7: result.color = float4(diffuse, 1.0); break;
+        case 8: result.color = float4(specular, 1.0); break;
+        default: break;
+    }
+        
     return result;
 }

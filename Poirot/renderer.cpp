@@ -46,14 +46,14 @@ namespace renderer {
 		XMFLOAT3   cam_pos_ws;
 	};
 
-	__declspec(align(256)) struct ObjectTransformations
+	__declspec(align(256)) struct Transformations
 	{
-		XMFLOAT4X4 a_world_from_objects[max_object_count];
+		XMFLOAT4X4 a_world_from_objects[max_transformation_count_per_scene];
 	};
 
 	__declspec(align(256)) struct MaterialList
 	{
-		Material a_material_data[max_material_count];
+		Material a_material_data[max_material_count_per_scene];
 	};
 
 	struct RenderBuffer
@@ -144,7 +144,7 @@ namespace renderer {
 	DescriptorHeap rtv_desc_heap{ 64u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV , false };
 
 	ConstantBuffer<PerFrameConstants> per_frame_cb;
-	ConstantBuffer<ObjectTransformations> transformations_cb;
+	ConstantBuffer<Transformations> transformations_cb;
 	ConstantBuffer<MaterialList> material_list_cb;
 
 	using TextureList = array<Texture, max_texture_count>;
@@ -154,6 +154,12 @@ namespace renderer {
 	using MeshList = array<Mesh, max_mesh_count>;
 	MeshList a_meshes{};
 	uint32_t num_used_mesh{ 0 };
+
+	uint32_t current_env_index{0};
+	uint32_t current_background_index{0};
+	uint32_t current_specular_mip_level{0};
+	uint32_t current_isolation_mode_index{0};
+	float test{ 0.f };
 
 	void DescriptorHeap::init() {
 		D3D12_DESCRIPTOR_HEAP_DESC desc = {};
@@ -485,7 +491,7 @@ namespace renderer {
 		a_root_params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 		a_root_params[0].Constants.ShaderRegister = 2;
 		a_root_params[0].Constants.RegisterSpace = 0;
-		a_root_params[0].Constants.Num32BitValues = 2;
+		a_root_params[0].Constants.Num32BitValues = 4;
 
 		// per frame cbv descriptor 
 		a_root_params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -922,6 +928,12 @@ namespace renderer {
 	}
 
 	void update(const GuiData& gui_data, uint32_t start_index_into_textures, uint32_t num_used_textures, const Camera& camera) {
+		current_env_index = gui_data.ibl_environment_index;
+		current_background_index = gui_data.background_env_map_type;
+		current_specular_mip_level = gui_data.background_specular_irradiance_mip_level;
+		current_isolation_mode_index = gui_data.isolation_mode_index;
+		test = gui_data.test;
+
 		auto num_used_descs = num_used_textures;
 		auto start_index_to_desc_heap = a_textures[start_index_into_textures].srv_descriptor_table_index;
 		{ // Update constant buffers
@@ -949,7 +961,7 @@ namespace renderer {
 			}
 		}
 		{ // Update srv descriptor table
-			uint32_t env_index = gui_data.ibl_environment_index;
+			
 			uint32_t num_source_static_descs = (is_msaa_enabled ? 2 : 1) + 1; // render_buffer srvs +  brdf_lut srv;
 			uint32_t target_heap_start_index = frame_index * max_descriptor_count_per_frame + 1;
 
@@ -965,7 +977,7 @@ namespace renderer {
 			com_device->CopyDescriptorsSimple(
 				num_descriptor_per_environment,
 				target_srv_desc_heap.get_cpu_handle(target_heap_start_index + num_source_static_descs),
-				source_srv_desc_heap.get_cpu_handle(num_source_static_descs + env_index * num_descriptor_per_environment),
+				source_srv_desc_heap.get_cpu_handle(num_source_static_descs + current_env_index * num_descriptor_per_environment),
 				D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
 			);
 
@@ -1003,13 +1015,13 @@ namespace renderer {
 			auto& mesh = a_meshes[draw_info.mesh_index];
 			com_command_list->IASetIndexBuffer(&mesh.ibv);
 			com_command_list->IASetVertexBuffers(0, 1, &mesh.vbv);
-			uint32_t a_root_constants[] = { draw_info.transformation_index, draw_info.material_index };
+			uint32_t a_root_constants[] = { draw_info.transformation_index, draw_info.material_index, current_isolation_mode_index, *reinterpret_cast<uint32_t*>(&test) };
 			com_command_list->SetGraphicsRoot32BitConstants(0, count_of(a_root_constants), a_root_constants, 0);
 			com_command_list->DrawIndexedInstanced(draw_info.draw_index_count, 1, draw_info.draw_first_index, 0, 0);
 		}
 	}
 
-	void render(const GuiData& gui_data) {
+	void render() {
 		float clear_color[] = { 0.f, 0.f, 0.f, 0.f };
 		com_command_list->SetGraphicsRootSignature(com_root_signature.Get());
 
@@ -1039,7 +1051,7 @@ namespace renderer {
 
 		// Draw Background
 		com_command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-		uint32_t a_root_constants[] = { gui_data.background_env_map_type, gui_data.background_specular_irradiance_mip_level };
+		uint32_t a_root_constants[] = { current_background_index, current_specular_mip_level };
 		com_command_list->SetGraphicsRoot32BitConstants(0, count_of(a_root_constants), a_root_constants, 0);
 		com_command_list->DrawInstanced(4, 1, 0, 0);
 
@@ -1049,7 +1061,7 @@ namespace renderer {
 		draw(scene_manager::get_opaque_draw_list());
 
 		// Draw Alpha Blended objects
-		com_command_list->SetPipelineState(com_scene_alpha_blend_pso.Get());
+		if(current_isolation_mode_index == 0) com_command_list->SetPipelineState(com_scene_alpha_blend_pso.Get());
 		draw(scene_manager::get_alpha_blend_draw_list());
 
 		if constexpr(is_msaa_enabled) {

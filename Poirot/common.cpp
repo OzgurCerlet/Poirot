@@ -12,8 +12,8 @@ constexpr uint32_t count_of(T(&)[N]) { return N; }
 constexpr DXGI_FORMAT	back_buffer_format{ DXGI_FORMAT_R8G8B8A8_UNORM };
 constexpr uint32_t		max_texture_count{ 128 };
 constexpr uint32_t		max_mesh_count{ 64 };
-constexpr uint16_t		max_object_count{ 128 };
-constexpr uint16_t		max_material_count{ 32 };
+constexpr uint16_t		max_transformation_count_per_scene{ 128 };
+constexpr uint16_t		max_material_count_per_scene{ 32 };
 constexpr uint16_t		max_descriptor_count_per_frame{ 128 };
 constexpr uint16_t		back_buffer_width{ 1280 };
 constexpr uint16_t		back_buffer_height{ 720 };
@@ -39,6 +39,9 @@ struct GuiData {
 	bool is_e_pressed;
 	bool is_q_pressed;
 
+	// view
+	uint32_t isolation_mode_index;
+
 	// model
 	uint32_t model_scene_index;
 
@@ -48,6 +51,9 @@ struct GuiData {
 	// background
 	uint32_t background_env_map_type;
 	uint32_t background_specular_irradiance_mip_level;
+
+	//
+	float test;
 };
 
 struct Vertex {
