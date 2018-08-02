@@ -33,12 +33,6 @@
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Window.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Gui.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="external\dear_imgui\imgui.cpp">
       <Filter>Source Files\external\dear_imgui</Filter>
     </ClCompile>
@@ -51,14 +45,23 @@
     <ClCompile Include="external\dear_imgui\imgui_impl_dx12.cpp">
       <Filter>Source Files\external\dear_imgui</Filter>
     </ClCompile>
+    <ClCompile Include="window.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gui.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="renderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="common.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="scene_manager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Window.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Gui.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="external\dear_imgui\imconfig.h">
       <Filter>Source Files\external\dear_imgui</Filter>
     </ClInclude>

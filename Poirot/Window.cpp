@@ -1,4 +1,20 @@
-#include "Window.h"
+
+class Window
+{
+public:
+	Window() = delete;
+	~Window() = default;
+	Window(HINSTANCE h_instance, uint16_t width = 960, uint16_t height = 540);
+
+	HWND get_handle();
+
+	static LRESULT CALLBACK window_proc(HWND h_window, UINT message, WPARAM wparam, LPARAM lparam);
+private:
+	HINSTANCE	_h_instance;
+	HWND		_h_window;
+	uint16_t	_width;
+	uint16_t	_height;
+};
 
 Window::Window(HINSTANCE h_instance, uint16_t width, uint16_t height) : _h_instance(h_instance), _width(width), _height(height) {
 
@@ -18,7 +34,7 @@ Window::Window(HINSTANCE h_instance, uint16_t width, uint16_t height) : _h_insta
 		window_class.lpszClassName, "Poirot", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
 		window_rect.right - window_rect.left, window_rect.bottom - window_rect.top, NULL, NULL, _h_instance, NULL
 	);
-	if(_h_window == NULL) { throw std::exception(); };
+	if(_h_window == NULL) { throw std::exception("Could not create the window"); };
 
 	ShowWindow(_h_window, TRUE);
 	UpdateWindow(_h_window);
