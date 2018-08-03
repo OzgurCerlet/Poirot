@@ -49,17 +49,17 @@ using namespace std;
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
-unique_ptr<Window> unq_window = nullptr;
+unique_ptr<Window> up_window = nullptr;
 
 void init(HINSTANCE h_instance) {
 
-	unq_window = make_unique<Window>(h_instance, back_buffer_width, back_buffer_height);
-	renderer::init(unq_window->get_handle());
+	up_window = make_unique<Window>(h_instance, back_buffer_width, back_buffer_height);
+	renderer::init(up_window->get_handle());
 	scene_manager::init();
 	renderer::execute_initial_commands();
 
 	auto [gui_font_srv_cpu_desc_handle, gui_font_srv_gpu_desc_handle] = renderer::get_handles_for_a_srv_desc();
-	gui::init(unq_window->get_handle(), max_inflight_frame_count, renderer::get_device(), back_buffer_format, gui_font_srv_cpu_desc_handle, gui_font_srv_gpu_desc_handle);
+	gui::init(up_window->get_handle(), max_inflight_frame_count, renderer::get_device(), back_buffer_format, gui_font_srv_cpu_desc_handle, gui_font_srv_gpu_desc_handle);
 }
 
 void update() {

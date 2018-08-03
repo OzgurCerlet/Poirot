@@ -125,11 +125,11 @@ namespace scene_manager
 			}
 		}
 	}
-
-	uint32_t current_scene_index = 0;
-	Camera camera;
+	
 	vector<unique_ptr<Scene>> scenes{};
-
+	Camera camera;
+	uint32_t current_scene_index = 0;
+	
 	void load_texture(tinygltf::Image &image, bool is_srgb, uint32_t &tex_index) {
 		size_t image_size = 0;
 		uint8_t *p_image_data = nullptr;
@@ -638,7 +638,16 @@ namespace scene_manager
 	void update(const GuiData& gui_data) {
 		current_scene_index = gui_data.model_scene_index;
 
-		// update per frame cb
+		// update camera
+		{
+			camera.aspect_ratio = (float)back_buffer_width / back_buffer_height;
+			XMMATRIX xm_clip_from_view = XMMatrixTranspose(XMMatrixPerspectiveFovLH(XMConvertToRadians(camera.vertical_fov_in_degrees), camera.aspect_ratio, camera.near_plane_in_meters, camera.far_plane_in_meters));
+			XMVECTOR determinant;
+			XMMATRIX xm_view_from_clip = XMMatrixInverse(&determinant, xm_clip_from_view);
+			XMStoreFloat4x4(&camera.clip_from_view, xm_clip_from_view);
+			XMStoreFloat4x4(&camera.view_from_clip, xm_view_from_clip);
+		}
+
 		{
 			float yaw_rad = camera.yaw_rad;
 			yaw_rad += gui_data.delta_yaw_rad;
@@ -682,33 +691,15 @@ namespace scene_manager
 			dampen_motion(prev_strafe, strafe);
 			dampen_motion(prev_ascent, ascent);
 
-			//{
-			//	auto cos_theta = cos(XMConvertToRadians(gui_data.view_zenith_angle_in_degrees));
-			//	auto sin_theta = sin(XMConvertToRadians(gui_data.view_zenith_angle_in_degrees));
-			//	auto cos_phi = cos(XMConvertToRadians(gui_data.view_azimuth_angle_in_degrees));
-			//	auto sin_phi = sin(XMConvertToRadians(gui_data.view_azimuth_angle_in_degrees));
-
-			//	XMFLOAT3 view_x_ws = { -sin_phi, cos_phi, 0.f };
-			//	XMFLOAT3 view_y_ws = { -cos_theta * cos_phi, -cos_theta * sin_phi, sin_theta };
-			//	XMFLOAT3 view_z_ws = { -sin_theta * cos_phi, -sin_theta * sin_phi, -cos_theta };
-			//	XMFLOAT4X4 world_from_view = {
-			//		view_x_ws.x, view_y_ws.x, view_z_ws.x, -view_z_ws.x * gui_data.view_distance_in_meters,
-			//		view_x_ws.y, view_y_ws.y, view_z_ws.y, -view_z_ws.y * gui_data.view_distance_in_meters,
-			//		view_x_ws.z, view_y_ws.z, view_z_ws.z, -view_z_ws.z * gui_data.view_distance_in_meters,
-			//		0.0, 0.0, 0.0, 1.0
-			//	};
-			//}
-
-			///////////////////////////////////////////////////////////////
-
-			static const XMMATRIX xm_change_of_basis = { // Left-handed +y : up, +x: right View Space -> Right-handed +z : up, -y: right World Space
-				0.0, 0.0,-1.0, 0,
-				1.0, 0.0, 0.0, 0,
-				0.0, 1.0, 0.0, 0,
-				0.0, 0.0, 0.0, 1.0
-			};
-
 			{
+				// Left-handed +y : up, +x: right View Space -> Right-handed +z : up, -y: right World Space
+				static const XMMATRIX xm_change_of_basis = { 
+					0.0, 0.0,-1.0, 0,
+					1.0, 0.0, 0.0, 0,
+					0.0, 1.0, 0.0, 0,
+					0.0, 0.0, 0.0, 1.0
+				};
+
 				auto xm_rotate_y = XMMatrixRotationY(-camera.yaw_rad);
 				auto xm_rotate_x = XMMatrixRotationX(-camera.pitch_rad);
 				auto xm_world_from_view = xm_change_of_basis * xm_rotate_y * xm_rotate_x;

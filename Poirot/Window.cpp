@@ -52,20 +52,11 @@ LRESULT CALLBACK Window::window_proc(HWND h_window, UINT msg, WPARAM wparam, LPA
 		return true;
 	}
 
-	PAINTSTRUCT paint_struct;
-	HDC h_device_context;
 	switch(msg) {
-		case WM_PAINT:{
-			h_device_context = BeginPaint(h_window, &paint_struct);
-			EndPaint(h_window, &paint_struct);
-		} break;
+		case WM_SIZE: { if(renderer::resize(lparam)) return 0; } break;
 		case WM_KEYDOWN: if(wparam == VK_ESCAPE) PostQuitMessage(0); break;
-		case WM_QUIT:
-		case WM_DESTROY:
-			PostQuitMessage(0);
-			break;
-		default:
-			return DefWindowProc(h_window, msg, wparam, lparam);
+		case WM_QUIT: case WM_DESTROY: PostQuitMessage(0);break;
+		default: return DefWindowProc(h_window, msg, wparam, lparam);
 	}
 
 	return 0;

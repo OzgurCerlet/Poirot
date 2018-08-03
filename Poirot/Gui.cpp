@@ -53,15 +53,6 @@ namespace gui
 			//else if(io.MouseWheel > 0.0) { gui_data.view_distance /= 1.05f; };
 		}
 		// Prepare gui
-		{
-			ImGui::SliderFloat("View azimuth angle", &gui_data.view_azimuth_angle_in_degrees, 0.0f, 360.0);
-			ImGui::SliderFloat("View zenith angle", &gui_data.view_zenith_angle_in_degrees, 0.0f, 90.0);
-			ImGui::SliderFloat("View distance", &gui_data.view_distance_in_meters, 1.0f, 1000.0);
-			ImGui::Text("Mouse Pos:  %.3f, %.3f", last_mouse_pos.x, last_mouse_pos.y);
-			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-		}
-
-		ImGui::Separator();
 
 		{
 			ImGui::PushItemWidth(200);
@@ -104,6 +95,12 @@ namespace gui
 			ImGui::PushItemWidth(200);
 			ImGui::SliderFloat("Test", &gui_data.test, 0.0, 1.0);
 		}
+
+		{
+			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+		}
+
+		ImGui::Separator();
 	}
 
 	void render() {

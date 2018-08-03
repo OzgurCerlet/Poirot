@@ -118,9 +118,6 @@ namespace renderer {
 	ComPtr<ID3D12CommandQueue> com_command_queue{ nullptr };
 	ComPtr<IDXGISwapChain3> com_swap_chain{ nullptr };
 
-	ComPtr<ID3D12DescriptorHeap> com_dsv_heap{ nullptr };
-	ComPtr<ID3D12Resource> com_dsv{ nullptr };
-
 	array<ComPtr<ID3D12CommandAllocator>, max_inflight_frame_count> a_com_command_allocators{};
 	ComPtr<ID3D12GraphicsCommandList> com_command_list{ nullptr };
 
@@ -138,10 +135,12 @@ namespace renderer {
 	array<RenderBuffer, max_inflight_frame_count> a_back_buffers{};
 	RenderBuffer hdr_buffer{ back_buffer_width , back_buffer_height, DXGI_FORMAT_R16G16B16A16_FLOAT, true, is_msaa_enabled };
 	RenderBuffer hdr_buffer_resolved{ back_buffer_width , back_buffer_height, DXGI_FORMAT_R16G16B16A16_FLOAT, true, false };
+	RenderBuffer depth_buffer{ back_buffer_width , back_buffer_height, DXGI_FORMAT_D32_FLOAT, false, is_msaa_enabled };
 
 	DescriptorHeap source_srv_desc_heap{ 256u, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV , false };
 	DescriptorHeap target_srv_desc_heap{ max_descriptor_count_per_frame * max_inflight_frame_count, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV , true };
 	DescriptorHeap rtv_desc_heap{ 64u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV , false };
+	DescriptorHeap dsv_desc_heap{ 1u, D3D12_DESCRIPTOR_HEAP_TYPE_DSV , false };
 
 	ConstantBuffer<PerFrameConstants> per_frame_cb;
 	ConstantBuffer<Transformations> transformations_cb;
@@ -559,12 +558,12 @@ namespace renderer {
 		static_sampler_0.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 		D3D12_STATIC_SAMPLER_DESC static_sampler_1 = {};
-		static_sampler_1.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+		static_sampler_1.Filter = D3D12_FILTER_ANISOTROPIC;
 		static_sampler_1.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
 		static_sampler_1.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
 		static_sampler_1.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-		static_sampler_1.MipLODBias = 0;
-		static_sampler_1.MaxAnisotropy = 16;
+		static_sampler_1.MipLODBias = mip_lod_bias;
+		static_sampler_1.MaxAnisotropy = max_anisotropy;
 		static_sampler_1.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
 		static_sampler_1.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK;
 		static_sampler_1.MinLOD = 0;
@@ -611,8 +610,8 @@ namespace renderer {
 
 		D3D12_INPUT_ELEMENT_DESC a_input_element_descs[] = {
 			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "UV", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+			{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+			{ "UV", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		};
 
 		D3D12_RASTERIZER_DESC default_rasterizer_desc = {};
@@ -730,7 +729,7 @@ namespace renderer {
 		}
 	}
 
-	void create_render_buffer(RenderBuffer& render_buffer, DescriptorHeap *p_rtv_desc_heap, DescriptorHeap *p_srv_desc_heap, const string &debug_name) {
+	void create_render_buffer(RenderBuffer& render_buffer, DescriptorHeap *p_rtv_desc_heap, DescriptorHeap *p_srv_desc_heap, const string &debug_name, int32_t rtv_desc_heap_index =-1, int32_t stv_desc_heap_index = -1) {
 		if(!render_buffer.com_resource) {
 			D3D12_HEAP_PROPERTIES heap_properties = {};
 			heap_properties.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -756,8 +755,8 @@ namespace renderer {
 		D3D12_RENDER_TARGET_VIEW_DESC desc = {};
 		desc.Format = render_buffer.format;
 		desc.ViewDimension = is_msaa_enabled ? D3D12_RTV_DIMENSION_TEXTURE2DMS : D3D12_RTV_DIMENSION_TEXTURE2D;
-		com_device->CreateRenderTargetView(render_buffer.com_resource.Get(), &desc, p_rtv_desc_heap->get_cpu_handle(p_rtv_desc_heap->num_used_descriptors));
-		render_buffer.rtv_descriptor_table_index = p_rtv_desc_heap->num_used_descriptors++;
+		com_device->CreateRenderTargetView(render_buffer.com_resource.Get(), &desc, p_rtv_desc_heap->get_cpu_handle((rtv_desc_heap_index >= 0) ? rtv_desc_heap_index : p_rtv_desc_heap->num_used_descriptors));
+		render_buffer.rtv_descriptor_table_index = (rtv_desc_heap_index >= 0) ? rtv_desc_heap_index : p_rtv_desc_heap->num_used_descriptors++;
 
 		if(render_buffer.is_shader_visible) {
 			D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -768,16 +767,46 @@ namespace renderer {
 			srv_desc.Texture2D.MipLevels = -1;
 			srv_desc.Texture2D.PlaneSlice = 0;
 			srv_desc.Texture2D.ResourceMinLODClamp = 0;
-			D3D12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handle = p_srv_desc_heap->get_cpu_handle(p_srv_desc_heap->num_used_descriptors);
+			D3D12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handle = p_srv_desc_heap->get_cpu_handle((stv_desc_heap_index>= 0) ? stv_desc_heap_index : p_srv_desc_heap->num_used_descriptors);
 			com_device->CreateShaderResourceView(render_buffer.com_resource.Get(), &srv_desc, cpu_descriptor_handle);
-			render_buffer.srv_descriptor_table_index = p_srv_desc_heap->num_used_descriptors++;
+			render_buffer.srv_descriptor_table_index = (stv_desc_heap_index >= 0) ? stv_desc_heap_index : p_srv_desc_heap->num_used_descriptors++;
 		}
+	}
+
+	void create_depth_buffer(RenderBuffer& depth_buffer, DescriptorHeap *p_dsv_desc_heap, const string &debug_name, int32_t dsv_desc_heap_index = -1) {
+
+		D3D12_DEPTH_STENCIL_VIEW_DESC dsv_desc = {};
+		dsv_desc.Format = depth_buffer.format;;
+		dsv_desc.ViewDimension = depth_buffer.is_multi_sampled ? D3D12_DSV_DIMENSION_TEXTURE2DMS : D3D12_DSV_DIMENSION_TEXTURE2D;
+		dsv_desc.Flags = D3D12_DSV_FLAG_NONE;
+
+		D3D12_CLEAR_VALUE dsc_clear_value = {};
+		dsc_clear_value.Format = depth_buffer.format;
+		dsc_clear_value.DepthStencil.Depth = 1.0f;
+
+		D3D12_HEAP_PROPERTIES heap_properties = {};
+		heap_properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+		D3D12_RESOURCE_DESC resource_desc = {};
+		resource_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+		resource_desc.Width = depth_buffer.width;
+		resource_desc.Height = depth_buffer.height;
+		resource_desc.DepthOrArraySize = 1;
+		resource_desc.MipLevels = 1;
+		resource_desc.Format = depth_buffer.format;
+		resource_desc.SampleDesc.Count = depth_buffer.is_multi_sampled ? ms_count : 1;
+		resource_desc.SampleDesc.Quality = depth_buffer.is_multi_sampled ? ms_quality : 0;
+		resource_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+		resource_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+		CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &dsc_clear_value, IID_PPV_ARGS(&depth_buffer.com_resource)), "");
+		D3D12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handle = p_dsv_desc_heap->get_cpu_handle((dsv_desc_heap_index >= 0) ? dsv_desc_heap_index : p_dsv_desc_heap->num_used_descriptors++);
+		com_device->CreateDepthStencilView(depth_buffer.com_resource.Get(), &dsv_desc, cpu_descriptor_handle);
 	}
 
 	void init(HWND h_window) {
 		ComPtr<IDXGIFactory5> com_dxgi_factory{ nullptr };
 		vector<ComPtr<IDXGIAdapter1>> v_com_dxgi_adapters{};
-		v_com_dxgi_adapters.reserve(4);
+		v_com_dxgi_adapters.reserve(8);
 
 		UINT factory_flags = 0;
 #if(_DEBUG)
@@ -790,7 +819,6 @@ namespace renderer {
 
 		HRESULT h_result = CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(&com_dxgi_factory));
 		if(FAILED(h_result)) { throw exception("DXGI Factory creation failed!"); }
-
 
 		UINT adapter_index = 0;
 		for(;;) {
@@ -870,6 +898,7 @@ namespace renderer {
 
 		{ // Initialize descriptor heaps
 			rtv_desc_heap.init();
+			dsv_desc_heap.init();
 			source_srv_desc_heap.init();
 			target_srv_desc_heap.init();
 		}
@@ -885,36 +914,7 @@ namespace renderer {
 		}
 	
 		{ // Create the depth-stencil view
-			D3D12_DESCRIPTOR_HEAP_DESC dsv_heap_desc = {};
-			dsv_heap_desc.NumDescriptors = 1;
-			dsv_heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-			CHECK_D3D12_CALL(com_device->CreateDescriptorHeap(&dsv_heap_desc, IID_PPV_ARGS(&com_dsv_heap)), "");
-
-			D3D12_DEPTH_STENCIL_VIEW_DESC dsv_desc = {};
-			dsv_desc.Format = DXGI_FORMAT_D32_FLOAT;
-			dsv_desc.ViewDimension = is_msaa_enabled ? D3D12_DSV_DIMENSION_TEXTURE2DMS : D3D12_DSV_DIMENSION_TEXTURE2D;
-			dsv_desc.Flags = D3D12_DSV_FLAG_NONE;
-
-			D3D12_CLEAR_VALUE dsc_clear_value = {};
-			dsc_clear_value.Format = DXGI_FORMAT_D32_FLOAT;
-			dsc_clear_value.DepthStencil.Depth = 1.0f;
-
-			D3D12_HEAP_PROPERTIES heap_properties = {};
-			heap_properties.Type = D3D12_HEAP_TYPE_DEFAULT;
-			D3D12_RESOURCE_DESC resource_desc = {};
-			resource_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-			resource_desc.Width = back_buffer_width;
-			resource_desc.Height = back_buffer_height;
-			resource_desc.DepthOrArraySize = 1;
-			resource_desc.MipLevels = 1;
-			resource_desc.Format = DXGI_FORMAT_D32_FLOAT;
-			resource_desc.SampleDesc.Count = is_msaa_enabled ? ms_count : 1;
-			resource_desc.SampleDesc.Quality = is_msaa_enabled ? ms_quality : 0;
-			resource_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-			resource_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-
-			CHECK_D3D12_CALL(com_device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &dsc_clear_value, IID_PPV_ARGS(&com_dsv)), "");
-			com_device->CreateDepthStencilView(com_dsv.Get(), &dsv_desc, com_dsv_heap->GetCPUDescriptorHandleForHeapStart());
+			create_depth_buffer(depth_buffer, &dsv_desc_heap, "depth_buffer");
 		}
 	
 		{ // Create constant buffers
@@ -933,9 +933,9 @@ namespace renderer {
 		current_specular_mip_level = gui_data.background_specular_irradiance_mip_level;
 		current_isolation_mode_index = gui_data.isolation_mode_index;
 		test = gui_data.test;
-
 		auto num_used_descs = num_used_textures;
 		auto start_index_to_desc_heap = a_textures[start_index_into_textures].srv_descriptor_table_index;
+
 		{ // Update constant buffers
 			{
 				per_frame_cb.constants.clip_from_view = camera.clip_from_view;
@@ -1044,7 +1044,7 @@ namespace renderer {
 		com_command_list->SetGraphicsRootDescriptorTable(4, target_srv_desc_heap.get_gpu_handle(1 + max_descriptor_count_per_frame * frame_index));
 
 		D3D12_CPU_DESCRIPTOR_HANDLE rtv_cpu_handle(rtv_desc_heap.get_cpu_handle(hdr_buffer.rtv_descriptor_table_index));
-		D3D12_CPU_DESCRIPTOR_HANDLE dsv_cpu_handle(com_dsv_heap->GetCPUDescriptorHandleForHeapStart());
+		D3D12_CPU_DESCRIPTOR_HANDLE dsv_cpu_handle(dsv_desc_heap.get_cpu_handle(depth_buffer.rtv_descriptor_table_index));
 		com_command_list->OMSetRenderTargets(1, &rtv_cpu_handle, FALSE, &dsv_cpu_handle);
 		com_command_list->ClearRenderTargetView(rtv_cpu_handle, clear_color, 0, nullptr);
 		com_command_list->ClearDepthStencilView(dsv_cpu_handle, D3D12_CLEAR_FLAG_DEPTH, 1.0, 0, 0, NULL);
@@ -1132,6 +1132,58 @@ namespace renderer {
 
 	void present() {
 		CHECK_DXGI_CALL(com_swap_chain->Present(1, 0));
+	}
+
+	bool resize(LPARAM lparam) {
+		if(com_swap_chain) {
+			back_buffer_width = (UINT)LOWORD(lparam);
+			back_buffer_height = (UINT)HIWORD(lparam);
+			HRESULT h_result;
+
+			wait_for_gpu();
+
+			for(int buffer_index = 0; buffer_index < max_inflight_frame_count; ++buffer_index) {
+				a_back_buffers[buffer_index].com_resource.Reset();
+				a_fence_values[buffer_index] = a_fence_values[frame_index];
+			}
+
+			DXGI_SWAP_CHAIN_DESC desc = {};
+			com_swap_chain->GetDesc(&desc);
+			CHECK_DXGI_CALL(com_swap_chain->ResizeBuffers(max_inflight_frame_count, back_buffer_width, back_buffer_height, desc.BufferDesc.Format, desc.Flags));
+			frame_index = com_swap_chain->GetCurrentBackBufferIndex();
+
+			for(int buffer_index = 0; buffer_index < max_inflight_frame_count; ++buffer_index) {
+				CHECK_DXGI_CALL(com_swap_chain->GetBuffer(buffer_index, IID_PPV_ARGS(&(a_back_buffers[buffer_index].com_resource))));
+				D3D12_RESOURCE_DESC desc = a_back_buffers[buffer_index].com_resource->GetDesc();
+				a_back_buffers[buffer_index].format = desc.Format;
+				a_back_buffers[buffer_index].width = static_cast<uint16_t>(desc.Width);
+				a_back_buffers[buffer_index].height = static_cast<uint16_t>(desc.Height);
+				a_back_buffers[buffer_index].is_multi_sampled = (desc.SampleDesc.Count > 1);
+			}
+
+			create_render_buffer(a_back_buffers[0], &rtv_desc_heap, nullptr, "back_buffer_0", 0);
+			create_render_buffer(a_back_buffers[1], &rtv_desc_heap, nullptr, "back_buffer_1", 1);
+			create_render_buffer(a_back_buffers[2], &rtv_desc_heap, nullptr, "back_buffer_2", 2);
+
+			if constexpr(is_msaa_enabled) {
+				hdr_buffer_resolved.com_resource.Reset();
+				hdr_buffer_resolved.width = back_buffer_width;
+				hdr_buffer_resolved.height = back_buffer_height;
+				create_render_buffer(hdr_buffer_resolved, &rtv_desc_heap, &source_srv_desc_heap, "hdr_buffer_resolved", 3, 0);
+			}
+			hdr_buffer.com_resource.Reset();
+			hdr_buffer.width = back_buffer_width;
+			hdr_buffer.height = back_buffer_height;
+			create_render_buffer(hdr_buffer, &rtv_desc_heap, &source_srv_desc_heap, "hdr_buffer", is_msaa_enabled ? 4 : 3, 1);
+			
+			depth_buffer.com_resource.Reset();
+			depth_buffer.width = back_buffer_width;
+			depth_buffer.height = back_buffer_height;
+			create_depth_buffer(depth_buffer, &dsv_desc_heap, "depth_buffer", 0);
+
+			return true;
+		}
+		return false;
 	}
 
 } // namespace renderer

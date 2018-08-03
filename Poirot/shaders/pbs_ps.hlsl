@@ -50,7 +50,7 @@ TextureCube env_map_specular    : register(t3, space1);
 Texture2D a_material_textures[] : register(t0, space2);
 
 SamplerState trilinear_clamp    : register(s0);
-SamplerState trilinear_wrap_ai16: register(s1);
+SamplerState aniso_wrap: register(s1);
 
 static const float k_min_roughness = 0.04;
 
@@ -76,7 +76,7 @@ float3x3 cotangent_frame(float3 normal_ws, float3 pos_ws, float2 uv) {
 
 float3 compute_normal(PsInput input, float3 normal_ws, Texture2D normal_texture) {
     float3x3 world_from_tangent = cotangent_frame(normal_ws, input.pos_ws, input.uv); 
-    float3 normal_ts = normalize(normal_texture.Sample(trilinear_wrap_ai16, input.uv).rgb * 2.0 - 1.0);
+    float3 normal_ts = normalize(normal_texture.Sample(aniso_wrap, input.uv).rgb * 2.0 - 1.0);
     normal_ws = normalize(mul(world_from_tangent, normal_ts));
     
     return normal_ws;
@@ -98,13 +98,13 @@ PsOutput ps_main(PsInput input) {
     
     float4 base_color = mat_data.base_color_factor;
     if (mat_data.base_color_texture_index >= 0) {
-        base_color *= a_material_textures[mat_data.base_color_texture_index].Sample(trilinear_wrap_ai16, input.uv);
+        base_color *= a_material_textures[mat_data.base_color_texture_index].Sample(aniso_wrap, input.uv);
     }
 
     float metallic = mat_data.metallic_factor;
     float roughness = mat_data.roughness_factor;
     if (mat_data.metallic_roughness_texture_index >= 0) {
-        float2 metallic_roughness = a_material_textures[mat_data.metallic_roughness_texture_index].Sample(trilinear_wrap_ai16, input.uv).bg; // WARNING! it is called metallicRoughnes texture but mapped to out of order channels: roughness -> g, metallic -> b!
+        float2 metallic_roughness = a_material_textures[mat_data.metallic_roughness_texture_index].Sample(aniso_wrap, input.uv).bg; // WARNING! it is called metallicRoughnes texture but mapped to out of order channels: roughness -> g, metallic -> b!
         metallic *= metallic_roughness.x;
         roughness *= metallic_roughness.y;
     }
@@ -139,7 +139,7 @@ PsOutput ps_main(PsInput input) {
 
     float3 emission = 0;
     if (mat_data.emissive_texture_index >= 0) {
-        emission = a_material_textures[mat_data.emissive_texture_index].Sample(trilinear_wrap_ai16, input.uv).rgb;
+        emission = a_material_textures[mat_data.emissive_texture_index].Sample(aniso_wrap, input.uv).rgb;
         color += emission;
     }
  

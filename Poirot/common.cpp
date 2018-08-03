@@ -12,17 +12,19 @@ constexpr uint32_t count_of(T(&)[N]) { return N; }
 constexpr DXGI_FORMAT	back_buffer_format{ DXGI_FORMAT_R8G8B8A8_UNORM };
 constexpr uint32_t		max_texture_count{ 128 };
 constexpr uint32_t		max_mesh_count{ 64 };
+constexpr float			mip_lod_bias{ -0.5f };
 constexpr uint16_t		max_transformation_count_per_scene{ 128 };
 constexpr uint16_t		max_material_count_per_scene{ 32 };
 constexpr uint16_t		max_descriptor_count_per_frame{ 128 };
-constexpr uint16_t		back_buffer_width{ 1280 };
-constexpr uint16_t		back_buffer_height{ 720 };
+uint16_t				back_buffer_width{ 1280 };
+uint16_t				back_buffer_height{ 720 };
 constexpr uint8_t		ms_count{ 8 };
 constexpr uint8_t		ms_quality{ 0 };
+constexpr uint8_t		max_anisotropy{ 16 };
 constexpr uint8_t		max_inflight_frame_count{ 3 };
 constexpr uint8_t		num_descriptor_per_environment{ 3 };
 constexpr bool			is_msaa_enabled{ true };
-bool					is_mipchain_generation_enabled = false;
+bool					is_mipchain_generation_enabled = true;
 
 struct GuiData {
 	float view_azimuth_angle_in_degrees;
@@ -112,6 +114,7 @@ namespace renderer {
 	ID3D12Device*				get_device();
 	ID3D12GraphicsCommandList*	get_command_list();
 	pair<D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE> get_handles_for_a_srv_desc();
+	bool resize(LPARAM lparam);
 }
 
 namespace scene_manager {
