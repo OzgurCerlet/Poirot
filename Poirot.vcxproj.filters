@@ -1,0 +1,102 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="source">
+      <UniqueIdentifier>{4b75c5a1-060a-4770-a628-adb4dcf7230e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source\external">
+      <UniqueIdentifier>{da80cbcb-010e-413a-a3ed-83636f0e39d2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source\shaders">
+      <UniqueIdentifier>{f4b69e96-94b7-4383-ac4a-efe24083aa7a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source\external\dear_imgui">
+      <UniqueIdentifier>{6a183b4c-2277-4cf0-8c32-69c72cb60ed1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source\external\tinygltf">
+      <UniqueIdentifier>{6ef296cc-eb25-430a-af88-cde29ec64f8f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source\external\stb">
+      <UniqueIdentifier>{b298573e-036a-47c3-8fc7-8990291a8aea}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source\external\octarine">
+      <UniqueIdentifier>{43a8b60e-fd96-437d-b244-13e8df62c3e5}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="source\common.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="source\gui.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="source\main.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="source\renderer.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="source\scene_manager.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="source\window.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="source\external\dear_imgui\imgui.cpp">
+      <Filter>source\external\dear_imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="source\external\dear_imgui\imgui_demo.cpp">
+      <Filter>source\external\dear_imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="source\external\dear_imgui\imgui_draw.cpp">
+      <Filter>source\external\dear_imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="source\external\dear_imgui\imgui_impl_dx12.cpp">
+      <Filter>source\external\dear_imgui</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="source\external\dear_imgui\imconfig.h">
+      <Filter>source\external\dear_imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\dear_imgui\imgui.h">
+      <Filter>source\external\dear_imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\dear_imgui\imgui_impl_dx12.h">
+      <Filter>source\external\dear_imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\dear_imgui\imgui_internal.h">
+      <Filter>source\external\dear_imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\dear_imgui\stb_rect_pack.h">
+      <Filter>source\external\dear_imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\dear_imgui\stb_textedit.h">
+      <Filter>source\external\dear_imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\dear_imgui\stb_truetype.h">
+      <Filter>source\external\dear_imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\tiny_gltf\json.hpp">
+      <Filter>source\external\tinygltf</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\tiny_gltf\stb_image.h">
+      <Filter>source\external\tinygltf</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\tiny_gltf\stb_image_write.h">
+      <Filter>source\external\tinygltf</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\tiny_gltf\tiny_gltf.h">
+      <Filter>source\external\tinygltf</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\stb\stb_image_resize.h">
+      <Filter>source\external\stb</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\octarine\octarine_image.h">
+      <Filter>source\external\octarine</Filter>
+    </ClInclude>
+    <ClInclude Include="source\external\octarine\octarine_mesh.h">
+      <Filter>source\external\octarine</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
