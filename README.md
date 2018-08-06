@@ -2,7 +2,7 @@
 
 # Poirot
 
-This project is a study into Direct3D 12, Physically Based Shading and Modern C++ (C++17). Even tough I had read extensively about these topics, I never had the chance to have any practical experience in them until now. For the moment, Poirot is a limited capability [gltf 2.0](https://github.com/KhronosGroup/glTF/tree/master/specification/2.0) scene viewer, 
+This project is a study into Direct3D 12, Physically Based Shading and Modern C++ (C++17). Even though I had read extensively about these topics, I never had the chance to have any practical experience in them until now. For the moment, Poirot is a limited capability [gltf 2.0](https://github.com/KhronosGroup/glTF/tree/master/specification/2.0) scene viewer, 
 but it will hopefully transform into an inspector module for my rendering framework Octarine. Which should explain its name.  
 
 # Prerequisites
