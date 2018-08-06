@@ -641,7 +641,7 @@ namespace scene_manager
 	}
 
 	void update(GuiData& gui_data) {
-		current_scene_index = gui_data.model_scene_index;
+		current_scene_index = (gui_data.model_scene_index < scenes.size()) ? gui_data.model_scene_index : 0;
 
 		// update camera
 		{

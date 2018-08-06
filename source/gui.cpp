@@ -65,7 +65,7 @@ namespace gui
 		ImGui::Separator();
 		{
 			ImGui::Text("Model: ");
-			const char* a_scenes[] = { "CVC Helmet", "Damaged Sci-fi Helmet", "Cartoon Pony", "Vintage Suitcase", "Boom Box" };
+			const char* a_scenes[] = { "CVC Helmet", "Damaged Sci-fi Helmet", "Cartoon Pony", "Vintage Suitcase"};
 			ImGui::Combo("Model", reinterpret_cast<int*>(&gui_data.model_scene_index), a_scenes, IM_ARRAYSIZE(a_scenes));
 		}
 		ImGui::Separator();
