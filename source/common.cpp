@@ -57,8 +57,11 @@ struct GuiData {
 	uint32_t background_env_map_type;
 	uint32_t background_specular_irradiance_mip_level;
 
-	//
+	// Test
 	float test;
+	float camera_yaw;
+	float camera_pitch;
+	XMFLOAT3 camera_pos;
 };
 
 struct Vertex {
@@ -110,7 +113,7 @@ struct Camera {
 };
 
 namespace gui { 
-	const GuiData&				get_data(); 
+	GuiData&				get_data(); 
 }
 
 namespace renderer {

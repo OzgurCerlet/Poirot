@@ -61,7 +61,7 @@ void init(HINSTANCE h_instance) {
 
 void update() {
 	gui::update(renderer::get_command_list());
-	auto gui_data = gui::get_data();
+	auto& gui_data = gui::get_data();
 
 	scene_manager::update(gui_data);
 	auto [start_index_into_textures, num_used_textures] = scene_manager::get_scene_texture_usage();

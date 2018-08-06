@@ -65,7 +65,7 @@ namespace gui
 		ImGui::Separator();
 		{
 			ImGui::Text("Model: ");
-			const char* a_scenes[] = { "CVC Helmet", "Damaged Sci-fi Helmet", "Cartoon Pony", "Vintage Suitcase" };
+			const char* a_scenes[] = { "CVC Helmet", "Damaged Sci-fi Helmet", "Cartoon Pony", "Vintage Suitcase", "Boom Box" };
 			ImGui::Combo("Model", reinterpret_cast<int*>(&gui_data.model_scene_index), a_scenes, IM_ARRAYSIZE(a_scenes));
 		}
 		ImGui::Separator();
@@ -84,8 +84,10 @@ namespace gui
 		ImGui::Separator();
 		{
 			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+			//ImGui::Text("Camera Yaw: %.3f Pitch: %3.f", XMConvertToDegrees(gui_data.camera_yaw), XMConvertToDegrees(gui_data.camera_pitch));
+			//ImGui::Text("Camera Pos:%.5f,%.5f,%.5f",gui_data.camera_pos.x, gui_data.camera_pos.y, gui_data.camera_pos.z);
 		}
-		ImGui::Separator();
+
 		ImGui::End();
 	}
 
@@ -94,7 +96,7 @@ namespace gui
 		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData());
 	}
 
-	const GuiData& get_data() {
+	GuiData& get_data() {
 		return gui_data;
 	}
 } // namespace gui

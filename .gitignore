@@ -263,4 +263,3 @@ __pycache__/
 # Poirot
 build/
 assets/
-*.bin

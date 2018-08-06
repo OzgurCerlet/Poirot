@@ -99,4 +99,21 @@
       <Filter>source\external\octarine</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="source\shaders\background_ps.hlsl">
+      <Filter>source\shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="source\shaders\copy_ps.hlsl">
+      <Filter>source\shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="source\shaders\full_screen_vs.hlsl">
+      <Filter>source\shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="source\shaders\pbs_ps.hlsl">
+      <Filter>source\shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="source\shaders\pbs_vs.hlsl">
+      <Filter>source\shaders</Filter>
+    </FxCompile>
+  </ItemGroup>
 </Project>

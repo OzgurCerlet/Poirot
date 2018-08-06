@@ -505,11 +505,12 @@ namespace scene_manager
 		XMVECTOR xm_length = XMVector4Length(XMLoadFloat3(&scene.bbox.min) - XMLoadFloat3(&scene.bbox.max));
 		float scale = 2.f / XMVectorGetX(xm_length);
 		XMMATRIX xm_change_of_basis = XMMatrixSet(
-			1.f, 0.f, 0.f, 0.f,
-			0.f, 0.f, flip_forward ? -1.f : 1.f, 0.f,
-			0.f, 1.f, 0.f, 0.f,
-			0.f, 0.f, 0.f, 1.f
+		1.f, 0.f, 0.f, 0.f,
+		0.f, 0.f, flip_forward ? 1.f : -1.f, 0.f,
+		0.f, 1.f, 0.f, 0.f,
+		0.f, 0.f, 0.f, 1.f
 		);
+		
 		scene.global_transform = xm_change_of_basis * XMMatrixScaling(scale, scale, scale) * XMMatrixTranspose(XMMatrixTranslationFromVector(xm_center));
 
 		for(auto node : scene.linear_nodes) {
@@ -523,11 +524,13 @@ namespace scene_manager
 		camera.aspect_ratio = (float)back_buffer_width / back_buffer_height;
 		camera.vertical_fov_in_degrees = 45.0f;
 		camera.near_plane_in_meters = 0.1f;
-		camera.far_plane_in_meters = 256.0f;
+		camera.far_plane_in_meters = 1024.0f;
 
-		camera.pos_ws = { 0.0f, 0.0f, 0.0f };
-		camera.dir_ws = { -1.0f, 0.0f, 0.0f };
-		camera.up_ws = { 0.0f, 0.0f, 1.0f };
+		camera.pos_ws = { 1.5f, -2.0f, 0.5f };
+		camera.yaw_rad = XMConvertToRadians(50.0);
+		camera.pitch_rad = XMConvertToRadians(20.0);
+		//camera.dir_ws = { -1.0f, -1.0f, 0.0f };
+		//camera.up_ws = { 0.0f, 0.0f, 1.0f };
 
 		XMMATRIX xm_clip_from_view = XMMatrixTranspose(XMMatrixPerspectiveFovLH(XMConvertToRadians(camera.vertical_fov_in_degrees), camera.aspect_ratio, camera.near_plane_in_meters, camera.far_plane_in_meters));
 		XMVECTOR determinant;
@@ -617,19 +620,19 @@ namespace scene_manager
 			unique_ptr<Scene> p_scene = nullptr;
 
 			p_scene = make_unique<Scene>();
-			load_scene("cvc_helmet/scene.gltf", *p_scene);
+			load_scene("cvc_helmet/scene.gltf", *p_scene, true);
 			scenes.push_back(move(p_scene));
 
 			p_scene = make_unique<Scene>();
-			load_scene("damaged_helmet/damagedHelmet.gltf", *p_scene);
+			load_scene("damaged_helmet/damagedHelmet.gltf", *p_scene, true);
 			scenes.push_back(move(p_scene));
 
 			p_scene = make_unique<Scene>();
-			load_scene("pony_cartoon/scene.gltf", *p_scene, true);
+			load_scene("pony_cartoon/scene.gltf", *p_scene);
 			scenes.push_back(move(p_scene));
 
 			p_scene = make_unique<Scene>();
-			load_scene("vintage_suitcase/scene.gltf", *p_scene, true);
+			load_scene("vintage_suitcase/scene.gltf", *p_scene);
 			scenes.push_back(move(p_scene));
 		}
 
@@ -637,7 +640,7 @@ namespace scene_manager
 		prepare_draw_lists();
 	}
 
-	void update(const GuiData& gui_data) {
+	void update(GuiData& gui_data) {
 		current_scene_index = gui_data.model_scene_index;
 
 		// update camera
@@ -663,8 +666,8 @@ namespace scene_manager
 			pitch_rad = XMMax(-XM_PIDIV2, pitch_rad);
 			camera.pitch_rad = pitch_rad;
 
-			static float move_speed_mps = 50.0f;
-			static float speed_scale = 0.06f;
+			static float move_speed_mps = 40.0f;
+			static float speed_scale = .06f;
 			static float delta_time_s = 0.016666f;
 
 			float forward = move_speed_mps * speed_scale * ((gui_data.is_w_pressed ? delta_time_s : 0.0f) + (gui_data.is_s_pressed ? -delta_time_s : 0.0f));
@@ -721,6 +724,10 @@ namespace scene_manager
 				XMStoreFloat4x4(&camera.view_from_world, xm_view_from_world);
 				XMStoreFloat4x4(&camera.world_from_view, xm_world_from_view);
 			}
+
+			gui_data.camera_yaw = camera.yaw_rad;
+			gui_data.camera_pitch = camera.pitch_rad;
+			gui_data.camera_pos = camera.pos_ws;
 		}
 	}
 
