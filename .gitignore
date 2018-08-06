@@ -263,3 +263,5 @@ __pycache__/
 # Poirot
 build/
 assets/
+!bin/octarine_image.lib
+!bin/octarine_mesh.lib
