@@ -646,6 +646,7 @@ namespace scene_manager
 		// update camera
 		{
 			camera.aspect_ratio = (float)back_buffer_width / back_buffer_height;
+			// We are taking the transpose of the projection matrix because we use post multiplication where as DirextMath uses pre-multiplication
 			XMMATRIX xm_clip_from_view = XMMatrixTranspose(XMMatrixPerspectiveFovLH(XMConvertToRadians(camera.vertical_fov_in_degrees), camera.aspect_ratio, camera.near_plane_in_meters, camera.far_plane_in_meters));
 			XMVECTOR determinant;
 			XMMATRIX xm_view_from_clip = XMMatrixInverse(&determinant, xm_clip_from_view);
