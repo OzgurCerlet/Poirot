@@ -53,7 +53,10 @@ LRESULT CALLBACK Window::window_proc(HWND h_window, UINT msg, WPARAM wparam, LPA
 	}
 
 	switch(msg) {
-		case WM_SIZE: { if(renderer::resize(lparam)) return 0; } break;
+		case WM_SIZE: {
+			if(wparam == SIZE_MINIMIZED) return 0;
+			if(renderer::resize(lparam)) return 0;
+		} break;
 		case WM_KEYDOWN: if(wparam == VK_ESCAPE) PostQuitMessage(0); break;
 		case WM_QUIT: case WM_DESTROY: PostQuitMessage(0);break;
 		default: return DefWindowProc(h_window, msg, wparam, lparam);
