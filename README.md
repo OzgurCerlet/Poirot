@@ -7,7 +7,7 @@ but it will hopefully transform into an inspector module for my rendering framew
 
 # Prerequisites
 
-The projecti set to build with the following configurations:
+The project is set to be built with the following configurations:
 * Windows 10 SDK (10.0.17134.0)
 * Visual Studio 2017 (v141)
 * A D3D_FEATURE_LEVEL_12_0 capable GPU. (Unfortunately, I could only test on a RX480 with Radeon Software version 18.7.1)
