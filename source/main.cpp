@@ -46,6 +46,8 @@ using namespace std;
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
+extern "C" { _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001; }
+
 unique_ptr<Window> up_window = nullptr;
 
 void init(HINSTANCE h_instance) {
